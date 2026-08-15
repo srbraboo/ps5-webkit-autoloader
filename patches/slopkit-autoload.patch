@@ -77,10 +77,49 @@ index df80712..55734ad 100644
  }
  
 diff --git a/slopkit/poops.js b/slopkit/poops.js
-index ae366f1..e8cf018 100644
+index ae366f1..f399d6b 100644
 --- a/slopkit/poops.js
 +++ b/slopkit/poops.js
-@@ -7819,9 +7819,9 @@ export function makePoopsEngine(X) {
+@@ -6293,6 +6293,38 @@ export function makePoopsEngine(X) {
+           "-fds=" + parkedFds.length +
+           "-action=reboot",
+       );
++
++      // KP FIX: terminate racer threads when stage 3 has certified alias repair.
++      // After a successful stage 3 + stage 4 + stage 5, the rthdr pointers are
++      // zeroed (aliasesRepaired=true) and elfldr is running - we no longer need
++      // the iov/uio kernel R/W primitive. The racer threads parked in blocking
++      // kernel calls are the primary source of post-exploit kernel panics:
++      // background PS5 daemons (network stack, syslogd) interact with the socket
++      // and pipe structures these threads hold, triggering KP after a few minutes.
++      // Terminating them here removes the dirty state from the kernel without
++      // touching the FDs (which stay parked as before).
++      if (S.aliasesRepaired) {
++        flushMark("POOPS-CLEANUP-RACERS-PRE", "aliasesRepaired=1-terminating-iov-uio-groups");
++        for (const g of [S.iovGroup, S.uioReadGroup, S.uioWriteGroup]) {
++          if (!g || !g.spawned || !g.spawned.length) continue;
++          try {
++            const ub = await unblockGroup(g);
++            forceSettled(g, "post-jailbreak");
++            const tr = await H.terminate(g, "post-jailbreak");
++            const detail = tr.already
++              ? "already terminated"
++              : "exited in " + tr.exitedMs + "ms";
++            rep.groups.push(g.name + ": post-jailbreak terminate -- " +
++              detail + ", unblock rounds=" + ub.rounds);
++          } catch (err) {
++            rep.groups.push(g.name + ": post-jailbreak terminate failed -- " +
++              String((err && err.message) || err).slice(0, 120));
++          }
++        }
++        S.groupsStillLive = [];
++        flushMark("POOPS-CLEANUP-RACERS-DONE", "iov-uio-groups-terminated");
++      }
++
+       return rep;
+     }
+ 
+@@ -7819,9 +7851,9 @@ export function makePoopsEngine(X) {
      flushMark("STAGE5-FETCH-BIN-OK", "bytes=" + binBytes.length);
  
      try {
