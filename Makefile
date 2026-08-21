@@ -16,7 +16,8 @@ LIBS     := $(TARGET)/lib/libmicrohttpd.a \
 
 # Source Files
 SRCS := src/main.c src/http_server.c src/app_installer.c \
-        src/notification.c src/ps5_launcher.c src/log.c src/inflate.c
+        src/notification.c src/ps5_launcher.c src/log.c src/inflate.c \
+        src/webkit_cleaner.c src/simulate_corrupt.c
 ELF := installer.elf
 
 # Generated file registry
@@ -54,6 +55,20 @@ WKAL_HOST_SOURCES := pc-host/host.py $(FRONTEND_FILES)
 # Compiler Flags
 CFLAGS  := -Os -Wall -ffunction-sections -fdata-sections $(INCLUDES)
 LDFLAGS := -Wl,--gc-sections
+
+# Test builds that simulate a corrupted WebKit AppCache (see tools/build_cache_corruption_test_elfs.sh):
+#   SIMULATE=0 (default) - production behavior, corruption detection only
+#   SIMULATE=1 - every cache download fails until /clear-webkit-data succeeds
+#                (tests the clear-and-retry repair flow end to end)
+#   SIMULATE=2 - every cache download always fails (tests the terminal-error retry path)
+# NOTE: CFLAGS changes are not tracked by make, so always `make clean all` when
+# switching SIMULATE modes.
+SIMULATE ?= 0
+ifeq ($(SIMULATE),1)
+CFLAGS += -DWKALI_SIMULATE_CACHE_CORRUPTION=1
+else ifeq ($(SIMULATE),2)
+CFLAGS += -DWKALI_SIMULATE_CACHE_CORRUPTION=2
+endif
 
 all: $(ELF)
 

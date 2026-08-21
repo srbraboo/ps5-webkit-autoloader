@@ -55,7 +55,7 @@ def git(*args):
     """Run a git command in the repo; returns stdout stripped or ''."""
     try:
         return subprocess.run(
-            ["git", *args], cwd=REPO, capture_output=True, text=True
+            ["git", *args], cwd=REPO, capture_output=True, text=True, errors="replace"
         ).stdout.strip()
     except OSError:
         return ""
