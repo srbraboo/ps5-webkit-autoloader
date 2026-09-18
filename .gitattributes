@@ -1,0 +1,4 @@
+# Patch files must preserve exact bytes (they are applied onto the pristine
+# slopkit submodule, whose poops.html has mixed CRLF/LF endings). Never let
+# autocrlf normalize them or git apply breaks on the Linux CI runner.
+*.patch -text

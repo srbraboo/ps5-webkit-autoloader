@@ -157,7 +157,7 @@ index 9e584d5..c0bbbc8 100644
              return;
          }
 diff --git a/slopkit/poops.html b/slopkit/poops.html
-index bbb2f2e..7c09822 100644
+index ed482cc..a6d702e 100644
 --- a/slopkit/poops.html
 +++ b/slopkit/poops.html
 @@ -501,6 +501,7 @@ const DEFAULT_ATTEMPTS = TRIGGER === "overflow" ? 96
@@ -176,25 +176,39 @@ index bbb2f2e..7c09822 100644
          count++;
          if (!Object.prototype.hasOwnProperty.call(expected, key)
              || expected[key] !== value) exact = false;
-@@ -943,7 +945,9 @@ const PAYLOADS = Object.freeze([
+@@ -942,8 +944,10 @@ const PAYLOADS = Object.freeze([
+         name: "kstuff.elf", info: "kstuff.elf - EchoStretch" },
      { title: "PLK Manager", description: "Payload management tools.",
          name: "PLK.elf", info: "PLK.elf - PLK" },
-     { title: "ShadowMountPlus", description: "Mount and manage game images.",
+-    { title: "ShadowMountPlus", description: "Mount and manage game images.",
 -        name: "shadowmountplus.elf", info: "shadowmountplus.elf - Drakmor" }
++    { title: "ShadowMountPlus", description: "Mount and manage game images.",
 +        name: "shadowmountplus.elf", info: "shadowmountplus.elf - Drakmor" },
 +    { title: "WKAL autoload", description: "", name: "payload.elf",
 +        info: "payload.elf", hidden: true }
  ]);
  
  function populatePayloadButtons() {
-@@ -976,6 +980,7 @@ function populatePayloadButtons() {
-         button.appendChild(title);
-         button.appendChild(description);
-         button.appendChild(info);
+@@ -973,12 +977,13 @@ function populatePayloadButtons() {
+         info.setAttribute("data-ready", payload.info);
+         info.textContent = payload.info.replace(" - ", " · ");
+ 
+-        button.appendChild(title);
+-        button.appendChild(description);
+-        button.appendChild(info);
+-        button.addEventListener("click", function (event) {
+-            if (event && event.preventDefault) event.preventDefault();
+-            sendPayloadInPlace(payload.name, button);
++        button.appendChild(title);
++        button.appendChild(description);
++        button.appendChild(info);
 +        if (payload.hidden) button.style.display = "none";
-         button.addEventListener("click", function (event) {
-             if (event && event.preventDefault) event.preventDefault();
-             sendPayloadInPlace(payload.name, button);
++        button.addEventListener("click", function (event) {
++            if (event && event.preventDefault) event.preventDefault();
++            sendPayloadInPlace(payload.name, button);
+         });
+         grid.appendChild(button);
+     }
 @@ -1178,7 +1183,7 @@ function preparePayloadSender() {
      }
  }
@@ -277,13 +291,25 @@ index bbb2f2e..7c09822 100644
  async function runLadder() {
      const X = ctx;
      LADDER = buildLadder(X, engine);
-@@ -2129,6 +2191,7 @@ async function runLadder() {
-         flushMark("ELFLDR-MENU-INPAGE",
-             "no-navigation-parked-racers-and-fds-remain-owned-port=9021");
-         if (!payloadMenuEl.classList.contains("on")) showPayloadMenu();
+@@ -2125,12 +2187,13 @@ async function runLadder() {
+         stage("selected stages complete, nothing triggered, everything put back -- "
+             + passed + " PASS", "ok");
+ 
+-    if (payloadSuccess) {
+-        flushMark("ELFLDR-MENU-INPAGE",
+-            "no-navigation-parked-racers-and-fds-remain-owned-port=9021");
+-        if (!payloadMenuEl.classList.contains("on")) showPayloadMenu();
+-    }
+-}
++    if (payloadSuccess) {
++        flushMark("ELFLDR-MENU-INPAGE",
++            "no-navigation-parked-racers-and-fds-remain-owned-port=9021");
++        if (!payloadMenuEl.classList.contains("on")) showPayloadMenu();
 +        startAutoload();
-     }
- }
++    }
++}
+ 
+ let bootChainReady = false;
  
 @@ -2575,6 +2638,7 @@ function lastRunText() {
          await refreshConsoleNetworkInfo();
