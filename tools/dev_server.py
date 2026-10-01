@@ -38,6 +38,11 @@ def get_version_info():
 
 
 def make_handler(base_dir, version, build_time):
+    if isinstance(version, str):
+        version = version.encode("utf-8")
+    if isinstance(build_time, str):
+        build_time = build_time.encode("utf-8")
+
     def translate(rel):
         # The autoloader HTML hardcodes /app/ for the ELF cache structure.
         # Map /app/ back to the root so the standalone files resolve.
@@ -60,6 +65,18 @@ def make_handler(base_dir, version, build_time):
             full = os.path.abspath(os.path.join(base_dir, *rel.split("/")))
             if rel == "" or rel.endswith("/"):
                 full = os.path.join(full, "index.html")
+            if rel.endswith("selected_exploit") or rel == "selected_exploit":
+                sel_mode = os.environ.get("FORCE_EXPLOIT", "relapse")
+                if sel_mode == "auto":
+                    sel_mode = "relapse"
+                data = (sel_mode + "\n").encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if not (os.path.isfile(full) and full.startswith(os.path.abspath(base_dir) + os.sep)):
                 self.send_error(404, "File not found")
                 return
@@ -70,7 +87,7 @@ def make_handler(base_dir, version, build_time):
             if rel.endswith((".html", ".htm")) or rel == "index.html":
                 data = data.replace(VERSION_TOKEN, version).replace(BUILD_TIME_TOKEN, build_time)
             if rel == "app.js":
-                # Build-time exploit override (auto | umtx2 | poops | p2jb),
+                # Build-time exploit override (auto | umtx2 | poops | relapse),
                 # from the FORCE_EXPLOIT env — same token as the ELF/host builds.
                 mode = os.environ.get("FORCE_EXPLOIT", "auto")
                 data = data.replace(b"[[EXPLOIT_MODE]]", mode.encode("utf-8"))
@@ -82,6 +99,7 @@ def make_handler(base_dir, version, build_time):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(data)
+
 
     return DevHandler
 

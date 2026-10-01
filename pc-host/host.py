@@ -477,6 +477,8 @@ class DualDirHandler(SimpleHTTPRequestHandler):
         where source is 'overrides', 'embedded' or 'base', or None if the
         file cannot be found anywhere."""
         rel = self._relative_path()
+        if rel.endswith("selected_exploit") or rel == "selected_exploit":
+            return b"relapse\n", "text/plain", time.time(), "virtual", "selected_exploit"
         candidates = [rel]
         if not rel or rel.endswith("/"):
             candidates = [rel + name for name in ("index.html", "index.htm")]

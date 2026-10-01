@@ -90,3 +90,9 @@ if ! grep -q 'wkalAutoloadName = new URLSearchParams' main.js \
     exit 1
 fi
 echo "umtx2: patch verification OK (mainloop autoload, own elfldr, confirm removed, payloads pruned)."
+
+# Parse-check the patched JS in the mode the browser will use it in. A
+# `node --check foo.js` parses in CommonJS (sloppy) mode, but these are ES
+# modules (strict) — a scope collision that sloppy mode accepts still kills the
+# chain on the console. See tools/check_exploit_js.py.
+"$ROOT/tools/check_exploit_js.py" "$DEST"

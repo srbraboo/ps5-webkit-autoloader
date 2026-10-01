@@ -89,16 +89,23 @@ $(ICON0) $(ICON_ICO) $(FAVICON_INSTALLER) $(FAVICON_AUTOLOADER) $(LOGO_INSTALLER
 
 $(FILE_REGISTRY_H) $(FILE_REGISTRY_C): $(FILE_REGISTRY_STAMP)
 
-# Copy third_party/slopkit -> frontend/autoloader/slopkit and apply our patch.
+# Copy third_party/relapse -> frontend/autoloader/relapse and apply our patch.
 # The copy is gitignored and regenerated on every build, so the submodule
 # stays pristine.
+.PHONY: relapse-prepare
+relapse-prepare:
+	@echo "Preparing relapse copy..."
+	./tools/apply_relapse_patch.sh
+
+# Copy third_party/slopkit -> frontend/autoloader/slopkit and apply our patch.
+# Pristine submodule, regenerated copy.
 .PHONY: slopkit-prepare
 slopkit-prepare:
 	@echo "Preparing slopkit copy..."
 	./tools/apply_slopkit_patch.sh
 
 # Copy third_party/umtx2/document/en/ps5 -> frontend/autoloader/umtx2 and apply
-# our patch. Same pattern as slopkit — pristine submodule, regenerated copy.
+# our patch. Same pattern as relapse — pristine submodule, regenerated copy.
 .PHONY: umtx2-prepare
 umtx2-prepare:
 	@echo "Preparing umtx2 copy..."
@@ -112,7 +119,7 @@ payload-deps:
 	@echo "Fetching shared elfldr + unified-autoloader payload..."
 	./tools/download_deps.sh
 
-$(FILE_REGISTRY_STAMP): $(FRONTEND_FILES) version icons slopkit-prepare umtx2-prepare payload-deps
+$(FILE_REGISTRY_STAMP): $(FRONTEND_FILES) version icons relapse-prepare slopkit-prepare umtx2-prepare payload-deps
 	@echo "Staging frontend into $(FRONTEND_STAGE)/..."
 	@V=$$($(PYTHON) tools/gen_version.py --print); \
 	rm -rf $(FRONTEND_STAGE) && \
@@ -137,7 +144,7 @@ $(ELF): $(FILE_REGISTRY_H) $(FILE_REGISTRY_C) $(SRCS) $(ICON0)
 # versioned ELF it already built); it defaults to $(ELF).
 HOST_PAYLOAD ?= $(ELF)
 
-$(WKAL_HOST): $(WKAL_HOST_SOURCES) version icons $(HOST_PAYLOAD) slopkit-prepare umtx2-prepare payload-deps
+$(WKAL_HOST): $(WKAL_HOST_SOURCES) version icons $(HOST_PAYLOAD) relapse-prepare slopkit-prepare umtx2-prepare payload-deps
 	@echo "Building $(WKAL_HOST) (embedding frontend/autoloader, overrides and the installer ELF)..."
 	$(PYTHON) tools/build_host.py --frontend $(FRONTEND_AUTOLOADER) --overrides pc-host/overrides --input pc-host/host.py --output $(WKAL_HOST) --payload $(HOST_PAYLOAD)
 
@@ -146,7 +153,7 @@ host: $(WKAL_HOST)
 # Serve the autoloader frontend locally (browser preview) with the same
 # /app/ path mapping and version tokens as the real build.
 .PHONY: dev
-dev: slopkit-prepare umtx2-prepare payload-deps
+dev: relapse-prepare slopkit-prepare umtx2-prepare payload-deps
 	$(PYTHON) tools/dev_server.py
 
 clean:
@@ -154,4 +161,5 @@ clean:
 	rm -f $(ELF) $(FILE_REGISTRY_H) $(FILE_REGISTRY_C) $(FILE_REGISTRY_STAMP)
 	rm -f $(WKAL_HOST) $(VERSION_HEADER)
 
-.PHONY: all host dev clean slopkit-prepare umtx2-prepare payload-deps
+.PHONY: all host dev clean relapse-prepare slopkit-prepare umtx2-prepare payload-deps
+

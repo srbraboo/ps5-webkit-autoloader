@@ -38,6 +38,8 @@ rm -rf "$DEST"
 mkdir -p "$DEST"
 cp -R "$SOURCE"/. "$DEST"/
 rm -rf "$DEST/.git" "$DEST/.github" "$DEST/.gitignore" "$DEST/.gitmodules"
+# Prune bundled kexp from payloads/ (comes from shared/kexp-ps5.bin)
+rm -f "$DEST/payloads/kexp"*.bin
 
 # 2. Turn the copy into a throwaway git repo so `git apply` can handle binary
 #    diffs / patch chunks — plain git apply on a non-repo dir cannot.
@@ -72,9 +74,11 @@ if ! grep -q 'sendPayloadToElfldr(cfg.autoload, "../../payloads/"' slopkit/poops
     || ! grep -q 'if (key === "autoload") return;' slopkit/poops.html \
     || ! grep -q 'name: "payload.elf"' slopkit/poops.html \
     || ! grep -q '"url=../../shared/" + name' slopkit/poops.js \
+    || ! grep -q '"../../shared/" + KEXP_BIN_NAME' slopkit/poops.js \
     || ! grep -q 'const AUTOLOAD = Q.get("autoload")' slopkit/p2jb.html \
     || ! grep -q 'sendPayloadToElfldr(AUTOLOAD, "../../payloads/")' slopkit/p2jb.html \
     || ! grep -q '"../../shared/elfldr-ps5.elf"' slopkit/p2jb.html \
+    || ! grep -q '"../../shared/kexp-ps5.bin"' slopkit/p2jb.html \
     || ! grep -q 'function startAutoload' slopkit/poops.html \
     || ! grep -q 'startAutoload();' slopkit/poops.html \
     || ! grep -q 'function elfldrAccepting' slopkit/poops.html \
@@ -82,13 +86,17 @@ if ! grep -q 'sendPayloadToElfldr(cfg.autoload, "../../payloads/"' slopkit/poops
     || ! grep -q 'function startAutoload' slopkit/p2jb.html \
     || ! grep -q 'startAutoload();' slopkit/p2jb.html \
     || ! grep -q 'function elfldrAccepting' slopkit/p2jb.html \
-    || ! grep -q 'AUTOLOAD-WAIT' slopkit/p2jb.html; then
+    || ! grep -q 'AUTOLOAD-WAIT' slopkit/p2jb.html \
+    || ! grep -q 'const why = "Already jailbroken.";' slopkit/poops.html \
+    || ! grep -q 'const why = "Already jailbroken.";' slopkit/p2jb.html; then
     echo "Error: slopkit patch verification FAILED — integration markers missing."
     echo "patches/slopkit-autoload.patch is incomplete or out of date."
     echo "Regenerate it from the pristine submodule:"
     echo "  git -C $SOURCE diff > $PATCH"
     exit 1
 fi
-echo "slopkit: patch verification OK (autoload block + probe-path autoload,"
-echo "         exactQuery relaxation, hidden payload.elf tile, shared elfldr"
+echo "slopkit: patch verification OK (autoload block + already-jailbroken abort,"
+echo "         exactQuery relaxation, hidden payload.elf tile, shared elfldr and kexp"
 echo "         on poops + p2jb)."
+
+python3 "$ROOT/tools/check_exploit_js.py" "$DEST"

@@ -1,5 +1,5 @@
 diff --git a/slopkit/p2jb.html b/slopkit/p2jb.html
-index 9e584d5..c0bbbc8 100644
+index 9e584d5..274ceee 100644
 --- a/slopkit/p2jb.html
 +++ b/slopkit/p2jb.html
 @@ -414,6 +414,7 @@ const LOG_DEBUG = Q.get("log") === "debug";
@@ -55,7 +55,7 @@ index 9e584d5..c0bbbc8 100644
          { cache: "no-store" });
      if (!response.ok)
          throw new Error("payload fetch failed: HTTP " + response.status);
-@@ -1853,6 +1858,75 @@ window.liveStatus = (function () {
+@@ -1853,6 +1858,74 @@ window.liveStatus = (function () {
  
  // p2jb.js is a classic script: it can only see window properties, so publish
  // the win overlay too (used on its ALREADY-JAILBROKEN path).
@@ -84,8 +84,7 @@ index 9e584d5..c0bbbc8 100644
 +}
 +
 +// WKAL: send ?autoload=<name> from the shared payloads dir to the running
-+// elfldr and report to the parent page. Used from both success paths -- the
-+// showWin() win handler AND the already-jailbroken probe short-circuit.
++// elfldr and report to the parent page. Used from the showWin() win handler.
 +// Instead of a fixed wait, poll until elfldr accepts connections:
 +// connect() x50 @200 ms ~= 10 s cap.
 +async function startAutoload() {
@@ -131,7 +130,7 @@ index 9e584d5..c0bbbc8 100644
  function showWin() {
      if (window.__p2jbWon) return;
      window.__p2jbWon = true;
-@@ -1862,6 +1936,7 @@ function showWin() {
+@@ -1862,6 +1935,7 @@ function showWin() {
      showVerdict(false, "ELF LOADER READY");
      stage("ELF LOADER READY", "ok");
      showPayloadMenu();
@@ -139,25 +138,51 @@ index 9e584d5..c0bbbc8 100644
  }
  window.showWin = showWin;
  
-@@ -1902,7 +1977,7 @@ async function main() {
+@@ -1902,8 +1976,8 @@ async function main() {
          // tree the ELFs live one level up (same place poops.html's sender
          // fetches). Must be set AFTER the adapter eval, which assigns its own
          // defaults, and BEFORE p2jb.js starts (it reads them at call time).
 -        window.P2JB_ELF_URL = "../payloads/elfldr-ps5-1360.elf";
+-        window.P2JB_KEXP_URL = "../payloads/kexp-v0.7-b12c352.bin";
 +        window.P2JB_ELF_URL = "../../shared/elfldr-ps5.elf";
-         window.P2JB_KEXP_URL = "../payloads/kexp-v0.7-b12c352.bin";
++        window.P2JB_KEXP_URL = "../../shared/kexp-ps5.bin";
          // From here the adapter owns the hijacked worker: route this page's
          // syscalls through it (per-NR stubs via window.call).
-@@ -2080,6 +2155,7 @@ function lastRunText() {
+         P2JB_ACTIVE = true;
+@@ -2079,7 +2153,17 @@ function lastRunText() {
+         await bootChain();
          await refreshConsoleNetworkInfo();
          if (await probeExistingElfLoader()) {
-             openExistingPayloadMenu();
-+            startAutoload();
+-            openExistingPayloadMenu();
++            if (AUTOLOAD) {
++                const why = "Already jailbroken.";
++                screenLine("[-] " + why);
++                stage(why, "bad");
++                try {
++                    window.parent.postMessage({ type: "wkal", kind: "autoload", ok: false, why: why }, "*");
++                } catch (e) {
++                }
++            } else {
++                openExistingPayloadMenu();
++            }
              sendRemoteEvents(false);
              return;
          }
+diff --git a/slopkit/p2jb_poops.js b/slopkit/p2jb_poops.js
+index 7cfb75c..42f3231 100644
+--- a/slopkit/p2jb_poops.js
++++ b/slopkit/p2jb_poops.js
+@@ -431,7 +431,7 @@
+     // execute_elf_store with a PARGS beacon produced ZERO lines on a successful 12.00
+     // poops run, because poops.html's harness ladder never calls it. What runs is
+     // poops.js stage5, which hands THIS shellcode the elfldr ELF as a raw data blob.
+-    G.P2JB_KEXP_URL = "payloads/kexp-v0.7-b12c352.bin";
++    G.P2JB_KEXP_URL = "../../shared/kexp-ps5.bin";
+     G.file_exists = function (path) {
+         // report the elfldr as present so stage_elfldr proceeds to read_file
+         return /elfldr/i.test(String(path)) || /kexp/i.test(String(path));
 diff --git a/slopkit/poops.html b/slopkit/poops.html
-index ed482cc..a6d702e 100644
+index ed482cc..2a947a7 100644
 --- a/slopkit/poops.html
 +++ b/slopkit/poops.html
 @@ -501,6 +501,7 @@ const DEFAULT_ATTEMPTS = TRIGGER === "overflow" ? 96
@@ -227,7 +252,7 @@ index ed482cc..a6d702e 100644
          { cache: "no-store" });
      if (!response.ok)
          throw new Error("payload fetch failed: HTTP " + response.status);
-@@ -1823,6 +1828,63 @@ function makeContext() {
+@@ -1823,6 +1828,62 @@ function makeContext() {
  
  let cleanupClaimed = false;
  
@@ -256,8 +281,7 @@ index ed482cc..a6d702e 100644
 +}
 +
 +// WKAL: send ?autoload=<name> from the shared payloads dir to the running
-+// elfldr and report to the parent page. Used from both success paths -- the
-+// end of a fresh ladder AND the already-jailbroken probe short-circuit.
++// elfldr and report to the parent page. Used from the end of a fresh ladder.
 +// Instead of a fixed wait, poll until elfldr accepts connections:
 +// connect() x50 @200 ms ~= 10 s cap.
 +async function startAutoload() {
@@ -291,7 +315,7 @@ index ed482cc..a6d702e 100644
  async function runLadder() {
      const X = ctx;
      LADDER = buildLadder(X, engine);
-@@ -2125,12 +2187,13 @@ async function runLadder() {
+@@ -2125,12 +2186,13 @@ async function runLadder() {
          stage("selected stages complete, nothing triggered, everything put back -- "
              + passed + " PASS", "ok");
  
@@ -311,16 +335,26 @@ index ed482cc..a6d702e 100644
  
  let bootChainReady = false;
  
-@@ -2575,6 +2638,7 @@ function lastRunText() {
+@@ -2574,7 +2636,16 @@ function lastRunText() {
+         await bootChain();
          await refreshConsoleNetworkInfo();
          if (await probeExistingElfLoader()) {
-             openExistingPayloadMenu();
-+            startAutoload();
+-            openExistingPayloadMenu();
++            if (cfg.autoload) {
++                const why = "Already jailbroken.";
++                screenLine("[-] " + why);
++                stage(why, "bad");
++                try {
++                    window.parent.postMessage({ type: "wkal", kind: "autoload", ok: false, why: why }, "*");
++                } catch (e) { }
++            } else {
++                openExistingPayloadMenu();
++            }
              sendRemoteEvents(false);
              return;
          }
 diff --git a/slopkit/poops.js b/slopkit/poops.js
-index 3c979df..32e13d2 100644
+index 3c979df..b164026 100644
 --- a/slopkit/poops.js
 +++ b/slopkit/poops.js
 @@ -6293,6 +6293,37 @@ export function makePoopsEngine(X) {
@@ -361,6 +395,26 @@ index 3c979df..32e13d2 100644
        return rep;
      }
  
+@@ -7791,16 +7822,16 @@ export function makePoopsEngine(X) {
+     // The kexp shellcode is an api-table build (ps5-kexp b12c352): it takes
+     // pre-resolved function addresses via its args extension and performs no
+     // dlsym syscalls itself, so the blob is mapped and run exactly as fetched.
+-    const KEXP_BIN_NAME = "kexp-v0.7-b12c352.bin";
++    const KEXP_BIN_NAME = "kexp-ps5.bin";
+ 
+     flushMark(
+       "STAGE5-FETCH-BIN-PRE",
+-      "url=../payloads/" + KEXP_BIN_NAME,
++      "url=../../shared/" + KEXP_BIN_NAME,
+     );
+     try {
+       const parts = [];
+       const g = await fetchInto(
+-        "../payloads/" + KEXP_BIN_NAME,
++        "../../shared/" + KEXP_BIN_NAME,
+         (off, chunk) => { parts.push(chunk); },
+       );
+       binBytes = new Uint8Array(g.total);
 @@ -7824,9 +7855,9 @@ export function makePoopsEngine(X) {
      flushMark("STAGE5-FETCH-BIN-OK", "bytes=" + binBytes.length);
  

@@ -42,14 +42,13 @@ def repo_root():
     return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
-# slopkit's bundled payload menu servers (ftpsrv, gdbsrv, kstuff, ...) are
-# never used by the autoloader — only the kexp it boots is needed (slopkit
-# boots the shared elfldr from /app/shared/, see tools/download_deps.sh).
-# umtx2 keeps its OWN bundled elfldr (umtx2/payloads/elfldr-ps5.elf, like stock
-# umtx2) and its other bundled payloads are pruned by tools/apply_umtx2_patch.sh.
-# The copied slopkit/umtx2 are throwaway git repos (tools/apply_*_patch.sh), so
-# .git must never be embedded. The payload digest sidecars (payloads/*.sha256)
-# are build-time bookkeeping and must never be served.
+# The exploits' payload dirs are already pruned to exactly what the chains load
+# (relapse keeps only its kexp shellcode and boots the shared elfldr from
+# shared/, see tools/download_deps.sh; umtx2 keeps its OWN elfldr-ps5.elf at
+# umtx2/payloads/, like stock umtx2), so nothing here needs per-exploit payload
+# filtering. The copied relapse/umtx2 are throwaway git repos
+# (tools/apply_*_patch.sh), so .git must never be embedded. The payload digest
+# sidecars (*.sha256) are build-time bookkeeping and must never be served.
 def include_in_zip(rel):
     if "/.git/" in rel or rel.endswith("/.git"):
         return False
@@ -116,7 +115,7 @@ def build_zip(frontend_dir, overrides_dir, version, build_time, payload_path=Non
                 data = data.replace(BUILD_TIME_TOKEN, build_time.encode("utf-8"))
                 zf.writestr(rel, data)
             elif rel == "app.js":
-                # Build-time exploit override (auto | umtx2 | poops | p2jb),
+                # Build-time exploit override (auto | umtx2 | poops | relapse),
                 # from the FORCE_EXPLOIT env — same token as the ELF build.
                 with open(file_map[rel], "rb") as f:
                     data = f.read()
@@ -125,6 +124,11 @@ def build_zip(frontend_dir, overrides_dir, version, build_time, payload_path=Non
                 zf.writestr(rel, data)
             else:
                 zf.write(file_map[rel], arcname=rel)
+
+        mode = os.environ.get("FORCE_EXPLOIT", "relapse")
+        if mode == "auto":
+            mode = "relapse"
+        zf.writestr("selected_exploit", (mode + "\n").encode("utf-8"))
 
     return archive.getvalue(), file_map
 

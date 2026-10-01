@@ -2,12 +2,11 @@ diff --git a/index.html b/index.html
 index 3ee132b..bcf6355 100644
 --- a/index.html
 +++ b/index.html
-@@ -84,7 +84,7 @@
+@@ -84,7 +84,6 @@
              throw reason;
          });
          document.getElementById("current-fw").innerHTML = fw_str;
 -        registerAppCacheEventHandlers();
-+        // registerAppCacheEventHandlers(); // WKAL: redundant, autoloader manages cache
          registerL2ButtonHandler();
          window.onload = function () {
              let autoload = sessionStorage.getItem(SESSIONSTORE_ON_LOAD_AUTORUN_KEY);

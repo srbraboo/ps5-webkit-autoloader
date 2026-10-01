@@ -51,20 +51,12 @@ def detect_content_type(path):
     return CONTENT_TYPES.get(ext, "application/octet-stream")
 
 
-# slopkit ships its own payload menu servers (ftpsrv, gdbsrv, kstuff, ...) that
-# our autoloader never uses — the chains only need the elfldr they boot and
-# the kexp shellcode that loads it. poops boots the shared elfldr (served from
-# /app/<version>/shared/elfldr-ps5.elf, see tools/download_deps.sh) and p2jb
-# is patched onto it too, so only the kexp is kept (both chains use it).
-# umtx2 boots its OWN bundled elfldr (kept by
-# tools/apply_umtx2_patch.sh at umtx2/payloads/elfldr-ps5.elf, like stock
-# umtx2); the rest of its payloads are pruned, and the autoload payload comes
-# from /app/<version>/payloads/. readme.png is a slopkit repo asset, also
-# unused. The copied slopkit is a throwaway git repo
-# (tools/apply_slopkit_patch.sh), so .git must never be embedded. The payload
-# digest sidecars (payloads/*.sha256) are build-time bookkeeping and must never
-# be served. /VERSION is the staging version handoff (see Makefile) — build-time
-# bookkeeping too.
+# The exploits' payload dirs are pruned to what the chains load (relapse keeps
+# only its kexp shellcode and boots the shared elfldr from /app/<version>/shared/;
+# slopkit keeps only its kexp and boots the shared elfldr too; umtx2 keeps its
+# own elfldr-ps5.elf). The autoload payload always comes from payloads/.
+# The copied repos are throwaways so .git must never be embedded.
+# The payload digest sidecars (*.sha256) and /VERSION are build-time bookkeeping.
 def include_in_registry(path):
     if "/.git/" in path or path.endswith("/.git"):
         return False
@@ -85,10 +77,11 @@ BUILD_TIME_PLACEHOLDER = b"[[BUILD_TIME_PLACEHOLDER]]"
 EXPLOIT_MODE_PLACEHOLDER = b"[[EXPLOIT_MODE]]"
 APP_DIR_PLACEHOLDER = b"[[APP_DIR_PLACEHOLDER]]"
 
-# The build-time exploit override in app.js (auto | umtx2 | poops | p2jb).
+# The build-time exploit override in app.js (auto | umtx2 | poops | relapse).
 # Defaults to "auto" (firmware routing) unless FORCE_EXPLOIT is set.
 DEFAULT_EXPLOIT_MODE = "auto"
-EXPLOIT_MODES = ("auto", "umtx2", "poops", "p2jb")
+EXPLOIT_MODES = ("auto", "umtx2", "poops", "relapse")
+
 
 
 def get_version_info_with_handoff(dist_dir):
@@ -162,14 +155,7 @@ def compress_entry(data):
     return comp, True
 
 
-# The autoloader iframe loads poops.html with this exact query string. AppCache
-# matches URLs exactly (query included), so the manifest must list the full URL
-# or the console serves a fallback document instead of the exploit page. The
-# app now lives under /app/<version>/, so the URL is prefixed with that. Keep
-# in sync with POOPS_URL in frontend/autoloader/app.js (which resolves to the
-# same absolute path from the versioned app dir). The trailing v= matches
-# slopkit's ROUTE_VERSION cache-bust (see the patch regeneration notes in
-# ARCHITECTURE.md).
+# The autoloader iframe loads poops.html with this exact query string.
 def poops_iframe_url(app_dir):
     return (
         app_dir + "/slopkit/slopkit/poops.html"
@@ -180,15 +166,14 @@ def poops_iframe_url(app_dir):
     )
 
 
-# Same for p2jb (FW 12.02-12.70): upstream's canonical production query plus
-# our autoload key (relaxed in patches/slopkit-autoload.patch). Keep in sync
-# with P2JB_URL in frontend/autoloader/app.js.
-def p2jb_iframe_url(app_dir):
-    return (
-        app_dir + "/slopkit/slopkit/p2jb.html"
-        "?go=1&auto=1&production=1&log=debug"
-        "&payload=1&autoload=payload.elf&v=final"
-    )
+# The autoloader iframe loads relapse/index.html with this exact query string.
+# AppCache matches URLs exactly (query included), so the manifest must list the
+# full URL or the console serves a fallback document instead of the exploit
+# page. The app lives under /app/<version>/, so the URL is prefixed with that.
+# Keep in sync with RELAPSE_URL in frontend/autoloader/app.js (which resolves to
+# the same absolute path from the versioned app dir).
+def relapse_iframe_url(app_dir):
+    return app_dir + "/relapse/index.html?autoload=payload.elf"
 
 
 # umtx2 auto-runs its chain on load via the 'on_load_autorun' sessionStorage
@@ -197,6 +182,7 @@ def p2jb_iframe_url(app_dir):
 # Keep in sync with UMTX2_URL in frontend/autoloader/app.js.
 def umtx2_iframe_url(app_dir):
     return app_dir + "/umtx2/index.html?autoload=payload.elf&v=1"
+
 
 # slopkit references its own scripts with cache-busting query strings
 # (e.g. "./core.js?v=final", "main.js?v=final", "../offsets/9.00.js?v=final").
@@ -212,6 +198,8 @@ def collect_cachebust_urls(files):
     in main.js, so every offsets file gets the ?v=final variant as well."""
     urls = set()
     for path, full in files:
+        if not path.endswith((".html", ".js")):
+            continue
         try:
             with open(full, "r", encoding="utf-8", errors="replace") as f:
                 data = f.read()
@@ -231,11 +219,12 @@ def collect_cachebust_urls(files):
 
 def build_manifest(files, version, build_time, app_dir, pointer_path, marker_path):
     """Build the AppCache manifest. Ordering matters for partial-cache safety:
-    every versioned file is listed first, then the exploit iframe URLs and the
-    slopkit cache-bust variants, then the pointer page, then the __complete__
-    marker LAST. The marker being the final entry means a successfully cached
-    marker implies the whole versioned directory was downloaded — and the
-    pointer (frontend/pointer/index.html) verifies the marker's content before
+    every versioned file is listed first, then the exploit iframe URLs (which
+    carry a query string, so they are not the same cache key as the bare file),
+    then the pointer page, then the __complete__ marker LAST. The marker being
+    the final entry means a successfully cached marker implies the whole
+    versioned directory was downloaded — and the pointer
+    (frontend/pointer/index.html) verifies the marker's content before
     redirecting into it."""
     lines = [
         "CACHE MANIFEST",
@@ -248,9 +237,10 @@ def build_manifest(files, version, build_time, app_dir, pointer_path, marker_pat
     cache_entries.sort()
     lines += cache_entries
     lines.append(poops_iframe_url(app_dir))
-    lines.append(p2jb_iframe_url(app_dir))
+    lines.append(relapse_iframe_url(app_dir))
     lines.append(umtx2_iframe_url(app_dir))
     lines += collect_cachebust_urls(files)
+    lines.append(app_dir + "/selected_exploit")
     lines.append(pointer_path)
     lines.append(marker_path)
     lines += [
@@ -259,6 +249,7 @@ def build_manifest(files, version, build_time, app_dir, pointer_path, marker_pat
         "/install",
         "/version",
         "/logs",
+
         "",
         "FALLBACK:",
         "/ /index.html",
