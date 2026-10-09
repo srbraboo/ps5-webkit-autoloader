@@ -56,10 +56,6 @@ body {
   background: -webkit-linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
 }
 
-/* The iframe's document runs the exploit and reports back to app.js. */
-#exploit {
-  display: none;
-}
 
 #logWrapper {
   width: 82%;
@@ -75,30 +71,30 @@ body {
   padding: 1rem 1.25rem;
 }
 
-#logContainer {
+#console {
   color: #94a3b8;
   overflow-wrap: break-word;
   word-break: break-word;
 }
 
-#logContainer .line {
+#console .log-line {
   white-space: pre-wrap;
   margin-bottom: 0.25rem;
 }
 
-#logContainer .info {
+#console .log-info, #console .log-setup, #console .log-star, #console .log-log, #console .log-cyan {
   color: #94a3b8;
 }
 
-#logContainer .success {
+#console .log-success, #console .log-plus {
   color: #7df966;
 }
 
-#logContainer .warning {
+#console .log-warn {
   color: #fbbf24;
 }
 
-#logContainer .error {
+#console .log-error, #console .log-minus {
   color: #f87171;
 }
 
@@ -147,4 +143,27 @@ body {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
   z-index: 1;
   pointer-events: none;
+}
+
+/* Reuse the standalone runner's console inside the original log panel. */
+#console {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  white-space: normal;
+}
+#logWrapper, #progressContainer { -webkit-flex-shrink: 0; flex-shrink: 0; }
+#progressContainer[data-state="error"] #progressBar { background: #b91c1c; }
+#progressContainer[data-state="done"] #progressBar { background: #15803d; }
+#footer { width: 92%; }
+#footer a { color: inherit; text-decoration: none; }
+@media (max-width: 600px) {
+  #logWrapper, #progressContainer { width: 92%; }
+  #logWrapper { height: 65%; font-size: 0.85rem; padding: 0.75rem; }
+  #progressContainer { margin-top: 1rem; }
+  #progressLabel { font-size: 0.85rem; padding: 0 0.5rem; text-align: center; }
+  #footer { font-size: 0.65rem; }
 }

@@ -9,7 +9,7 @@ on:
         required: false
         default: dev
       custom_version:
-        description: 'Optional version suffix appended to the base version (e.g. umtx2-test -> 0.2.2-umtx2-test). Leave empty for auto 0.2.2-pre-<githash>.'
+        description: 'Optional version suffix appended to the base version (e.g. cache-test -> 0.2.2-cache-test). Leave empty for auto 0.2.2-pre-<githash>.'
         type: string
         required: false
 
@@ -30,7 +30,7 @@ jobs:
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
-          submodules: recursive
+          submodules: true
 
       - name: Extract Version
         id: version

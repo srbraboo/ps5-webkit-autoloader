@@ -1,165 +1,146 @@
-# WebKit Autoloader Installer - Native PS5 ELF Makefile
-
-# Tools
+# Native installer plus a standalone PC setup host.
 PYTHON := python3
-CC     := /opt/ps5-payload-sdk/bin/prospero-clang
-STRIP  := /opt/ps5-payload-sdk/bin/prospero-strip
-
-# Paths
-SDK      := /opt/ps5-payload-sdk
-TARGET   := $(SDK)/target
-INCLUDES := -Iinclude -I$(TARGET)/include
-LIBS     := $(TARGET)/lib/libmicrohttpd.a \
-            -L$(TARGET)/lib -lpthread \
-            -lSceNetCtl -lSceUserService -lSceSystemService \
-            -lSceAppInstUtil
-
-# Source Files
-SRCS := src/main.c src/http_server.c src/app_installer.c \
-        src/notification.c src/ps5_launcher.c src/log.c src/inflate.c \
-        src/webkit_cleaner.c src/simulate_corrupt.c
+LOADER := third_party/ps5-webkit-remote-loader
+INSTALLER_COMMON := $(LOADER)/installer/common
+include $(INSTALLER_COMMON)/common.mk
+SDK := /opt/ps5-payload-sdk
+CC := $(SDK)/bin/prospero-clang
+STRIP := $(SDK)/bin/prospero-strip
+TARGET := $(SDK)/target
+CFLAGS := -Os -Wall -ffunction-sections -fdata-sections -Iinclude -I$(INSTALLER_COMMON) -I$(TARGET)/include
+LDFLAGS := -Wl,--gc-sections
+LIBS := $(TARGET)/lib/libmicrohttpd.a -L$(TARGET)/lib -lpthread \
+        -lSceNetCtl -lSceUserService -lSceSystemService -lSceAppInstUtil
+SRCS := src/main.c src/http_server.c $(INSTALLER_COMMON_SRCS)
 ELF := installer.elf
 
-# Generated file registry
-FILE_REGISTRY_H := include/file_registry.h
-FILE_REGISTRY_C := include/file_registry.c
-FILE_REGISTRY_STAMP := include/.file_registry.stamp
+# One version per make invocation, including dirty-tree builds.
+ifndef BUILD_VERSION
+BUILD_VERSION := $(shell $(PYTHON) tools/gen_version.py --print)
+endif
+export BUILD_VERSION
 
-# Generated version header (stable = base version, dev = + hash/timestamp suffix, see tools/gen_version.py)
-VERSION_HEADER := include/wkali_version.h
+ifndef BUILD_TITLE
+BUILD_TITLE := $(shell $(PYTHON) tools/gen_version.py --title)
+endif
 
-# Frontend sources — staged into frontend/dist/ before registry generation:
-#   installer-page/  → cache/progress entry page at dist root
-#   pointer/         → stable /app/index.html entry that redirects into the
-#                      versioned app dir after verifying its __complete__ marker
-#   autoloader/      → the actual WKAL app, served under /app/<version>/
-FRONTEND_INSTALLER_PAGE := frontend/installer-page
-FRONTEND_POINTER := frontend/pointer
-FRONTEND_AUTOLOADER := frontend/autoloader
-FRONTEND_STAGE := frontend/dist
-FRONTEND_FILES := $(shell find $(FRONTEND_INSTALLER_PAGE) $(FRONTEND_POINTER) $(FRONTEND_AUTOLOADER) -type f 2>/dev/null)
+BUILDER := $(PYTHON) $(LOADER)/tools/build_standalone.py
+CHAINS := poops relapse
+# One standalone page per chain, carrying elfldr-check.js, the chain's exploit,
+# then autoload.js. The chain sources are unmodified
+# submodule payloads; each exploit prefetches elfldr/kexp itself.
+# Autoloader appearance is embedded through the upstream builder's hooks.
+# Each variable accepts a whitespace-separated list of file paths.
+PAGE_CSS ?= frontend/autoloader/style.css
+PAGE_JS ?= frontend/autoloader/app.js
+PAGE_CONFIG := build/page-config.js
+ELFLDR_TAG := v0.26-bb1e117
+ELFLDR_VIRTUAL := shared/elfldr-ps5-$(ELFLDR_TAG).elf
+PAGE_FLAGS := --elfldr $(ELFLDR_VIRTUAL)=build/deps/elfldr.elf \
+              $(foreach file,$(PAGE_CSS),--css "$(file)") \
+              --js "$(PAGE_CONFIG)" \
+              $(foreach file,$(PAGE_JS),--js "$(file)")
+APP_PAGE := build/autoloader/index.html
+HOST_PAGE := build/host/index.html
+STAGE := frontend/dist
+REGISTRY := include/file_registry.h include/file_registry.c
+ICONS := assets/icon0.png assets/icon.ico
+INSTALLER_LOGO := frontend/installer-page/logo.svg
+HOST_PAYLOAD ?= $(ELF)
+PAYLOAD_TAG ?= $(shell git -C third_party/ps5-unified-autoloader describe --tags --always 2>/dev/null || echo v0.1.5-915a65e)
+AUTOLOAD_PAYLOAD_VIRTUAL ?= ps5-unified-autoloader-$(PAYLOAD_TAG).elf
+HOST_PAYLOAD_VIRTUAL ?= $(if $(filter-out installer.elf,$(notdir $(HOST_PAYLOAD))),$(notdir $(HOST_PAYLOAD)),webkit-autoloader-installer_v$(BUILD_VERSION).elf)
 
-# Generated icon assets (master: assets/icon.svg, see tools/gen_icons.py)
-ICON_MASTER := assets/icon.svg
-ICON0 := assets/icon0.png
-ICON_ICO := assets/icon.ico
-FAVICON_INSTALLER := $(FRONTEND_INSTALLER_PAGE)/favicon.svg
-FAVICON_AUTOLOADER := $(FRONTEND_AUTOLOADER)/favicon.svg
-LOGO_INSTALLER := $(FRONTEND_INSTALLER_PAGE)/logo.svg
-LOGO_AUTOLOADER := $(FRONTEND_AUTOLOADER)/logo.svg
-
-# Standalone PC host script (webkit-autoloader-host.py) with the autoloader embedded
-WKAL_HOST := webkit-autoloader-host.py
-WKAL_HOST_SOURCES := pc-host/host.py $(FRONTEND_FILES)
-
-# Compiler Flags
-CFLAGS  := -Os -Wall -ffunction-sections -fdata-sections $(INCLUDES)
-LDFLAGS := -Wl,--gc-sections
-
-# Test builds that simulate a corrupted WebKit AppCache (see tools/build_cache_corruption_test_elfs.sh):
-#   SIMULATE=0 (default) - production behavior, corruption detection only
-#   SIMULATE=1 - every cache download fails until /clear-webkit-data succeeds
-#                (tests the clear-and-retry repair flow end to end)
-#   SIMULATE=2 - every cache download always fails (tests the terminal-error retry path)
-# NOTE: CFLAGS changes are not tracked by make, so always `make clean all` when
-# switching SIMULATE modes.
+# Optional cache-repair hardware test builds; use make clean all when changing.
 SIMULATE ?= 0
-ifeq ($(SIMULATE),1)
-CFLAGS += -DWKALI_SIMULATE_CACHE_CORRUPTION=1
-else ifeq ($(SIMULATE),2)
-CFLAGS += -DWKALI_SIMULATE_CACHE_CORRUPTION=2
+ifneq ($(SIMULATE),0)
+CFLAGS += -DINSTALLER_SIMULATE_CACHE_CORRUPTION=$(SIMULATE)
 endif
 
 all: $(ELF)
 
-# Regenerate the version header on every build (cheap, only rewrites on change)
-.PHONY: version print-version icons
 version:
 	$(PYTHON) tools/gen_version.py
 
 print-version:
-	@$(PYTHON) tools/gen_version.py --print
+	@echo $(BUILD_VERSION)
 
-# Regenerate all derived icon assets (homescreen icon, .ico, favicons, logos)
-icons: $(ICON0) $(ICON_ICO) $(FAVICON_INSTALLER) $(FAVICON_AUTOLOADER) $(LOGO_INSTALLER) $(LOGO_AUTOLOADER)
+test:
+	node tools/test_elfldr_check.js
+	node tools/test_autoload_payload.js
+	node tools/test_installer.js
+	node tools/test_selection_flow.js
 
-$(ICON0) $(ICON_ICO) $(FAVICON_INSTALLER) $(FAVICON_AUTOLOADER) $(LOGO_INSTALLER) $(LOGO_AUTOLOADER): $(ICON_MASTER) tools/gen_icons.py
-	@echo "Generating icon assets from $(ICON_MASTER)..."
+# Run on Linux or in the SDK container; PS5 services are stubbed.
+test-native:
+	$(PYTHON) $(LOADER)/tools/installer_common_test.py
+
+icons: $(ICONS) $(INSTALLER_LOGO)
+assets/icon0.png: assets/icon.svg tools/gen_icons.py
 	$(PYTHON) tools/gen_icons.py
+assets/icon.ico: assets/icon0.png
+	@test -f $@ || $(PYTHON) tools/gen_icons.py
 
-$(FILE_REGISTRY_H) $(FILE_REGISTRY_C): $(FILE_REGISTRY_STAMP)
+$(INSTALLER_LOGO): assets/icon.svg
+	cp $< $@
 
-# Copy third_party/relapse -> frontend/autoloader/relapse and apply our patch.
-# The copy is gitignored and regenerated on every build, so the submodule
-# stays pristine.
-.PHONY: relapse-prepare
-relapse-prepare:
-	@echo "Preparing relapse copy..."
-	./tools/apply_relapse_patch.sh
-
-# Copy third_party/slopkit -> frontend/autoloader/slopkit and apply our patch.
-# Pristine submodule, regenerated copy.
-.PHONY: slopkit-prepare
-slopkit-prepare:
-	@echo "Preparing slopkit copy..."
-	./tools/apply_slopkit_patch.sh
-
-# Copy third_party/umtx2/document/en/ps5 -> frontend/autoloader/umtx2 and apply
-# our patch. Same pattern as relapse — pristine submodule, regenerated copy.
-.PHONY: umtx2-prepare
-umtx2-prepare:
-	@echo "Preparing umtx2 copy..."
-	./tools/apply_umtx2_patch.sh
-
-# Fetch the shared elfldr + the bundled ps5-unified-autoloader payload ELF from
-# their pinned GitHub releases (tools/download_deps.sh). Idempotent: skips when
-# the binaries are already present and verified, so offline rebuilds still work.
-.PHONY: payload-deps
 payload-deps:
-	@echo "Fetching shared elfldr + unified-autoloader payload..."
 	./tools/download_deps.sh
 
-$(FILE_REGISTRY_STAMP): $(FRONTEND_FILES) version icons relapse-prepare slopkit-prepare umtx2-prepare payload-deps
-	@echo "Staging frontend into $(FRONTEND_STAGE)/..."
-	@V=$$($(PYTHON) tools/gen_version.py --print); \
-	rm -rf $(FRONTEND_STAGE) && \
-	mkdir -p $(FRONTEND_STAGE)/app/$$V && \
-	cp -R $(FRONTEND_INSTALLER_PAGE)/. $(FRONTEND_STAGE)/ && \
-	cp -R $(FRONTEND_POINTER)/. $(FRONTEND_STAGE)/app/ && \
-	cp -R $(FRONTEND_AUTOLOADER)/. $(FRONTEND_STAGE)/app/$$V/ && \
-	echo "$$V" > $(FRONTEND_STAGE)/VERSION
-	@echo "Generating file registry from $(FRONTEND_STAGE)/..."
-	$(PYTHON) tools/gen_file_registry.py $(FRONTEND_STAGE) $(FILE_REGISTRY_H) $(FILE_REGISTRY_C)
-	@touch $(FILE_REGISTRY_STAMP)
+# One page per chain: ELF loader check first, then exploit and autoload. Both
+# are cached, so the choice of chain never has to invalidate anything.
+page: payload-deps
+	@mkdir -p build/autoloader
+	$(PYTHON) tools/gen_version.py --page-config $(PAGE_CONFIG)
+	@for chain in $(CHAINS); do \
+	    echo "$(BUILDER) payloads/$$chain.js -> build/autoloader/$$chain.html"; \
+	    $(BUILDER) $(CURDIR)/payloads/elfldr-check.js payloads/$$chain.js $(CURDIR)/payloads/autoload.js::$(AUTOLOAD_PAYLOAD_VIRTUAL) \
+	        --title "$(BUILD_TITLE)" $(PAGE_FLAGS) \
+	        --embed $(AUTOLOAD_PAYLOAD_VIRTUAL)=build/deps/autoload.elf \
+	        -o $(CURDIR)/build/autoloader/$$chain.html || exit 1; \
+	done
 
-$(ELF): $(FILE_REGISTRY_H) $(FILE_REGISTRY_C) $(SRCS) $(ICON0)
-	@echo "Building $(ELF)..."
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $(ELF) $(SRCS) $(FILE_REGISTRY_C) $(LIBS)
-	@echo "Stripping $(ELF)..."
-	$(STRIP) $(ELF)
+registry: version page $(INSTALLER_LOGO)
+	rm -rf $(STAGE)
+	@mkdir -p $(STAGE)/app/$(BUILD_VERSION)
+	cp frontend/installer-page/index.html $(INSTALLER_LOGO) $(STAGE)/
+	cp frontend/pointer/index.html $(STAGE)/app/index.html
+	@for chain in $(CHAINS); do \
+	    cp build/autoloader/$$chain.html $(STAGE)/app/$(BUILD_VERSION)/$$chain.html || exit 1; \
+	done
+	@echo "$(BUILD_VERSION)" > $(STAGE)/VERSION
+	$(PYTHON) tools/gen_file_registry.py $(STAGE) $(word 1,$(REGISTRY)) $(word 2,$(REGISTRY))
 
-# The PC host is the one-time setup flow: it serves the installer ELF (the
-# homescreen-app installer) instead of the bundled unified-autoloader payload.
-# HOST_PAYLOAD overrides the payload path (build_release.sh passes the
-# versioned ELF it already built); it defaults to $(ELF).
-HOST_PAYLOAD ?= $(ELF)
+$(ELF): registry icons $(SRCS) $(wildcard include/*.h) $(INSTALLER_COMMON_HEADERS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRCS) include/file_registry.c $(LIBS)
+	$(STRIP) $@
 
-$(WKAL_HOST): $(WKAL_HOST_SOURCES) version icons $(HOST_PAYLOAD) relapse-prepare slopkit-prepare umtx2-prepare payload-deps
-	@echo "Building $(WKAL_HOST) (embedding frontend/autoloader, overrides and the installer ELF)..."
-	$(PYTHON) tools/build_host.py --frontend $(FRONTEND_AUTOLOADER) --overrides pc-host/overrides --input pc-host/host.py --output $(WKAL_HOST) --payload $(HOST_PAYLOAD)
+# The setup host embeds the installer ELF. It packages both chains (Relapse as
+# default index.html, Poops as poops.html) so firmwares where Relapse is
+# unsupported (9.05, 11.40) are automatically routed to Poops.
+HOST_RELAPSE := build/host/relapse.html
+HOST_POOPS := build/host/poops.html
 
-host: $(WKAL_HOST)
+host: $(HOST_PAYLOAD) payload-deps assets/icon.ico
+	@mkdir -p build/host
+	$(PYTHON) tools/gen_version.py --page-config $(PAGE_CONFIG)
+	$(BUILDER) $(CURDIR)/payloads/elfldr-check.js payloads/relapse.js $(CURDIR)/payloads/autoload.js::$(HOST_PAYLOAD_VIRTUAL) \
+	    --title "$(BUILD_TITLE)" $(PAGE_FLAGS) \
+	    --embed $(HOST_PAYLOAD_VIRTUAL)=$(HOST_PAYLOAD) -o $(CURDIR)/$(HOST_RELAPSE)
+	$(BUILDER) $(CURDIR)/payloads/elfldr-check.js payloads/poops.js $(CURDIR)/payloads/autoload.js::$(HOST_PAYLOAD_VIRTUAL) \
+	    --title "$(BUILD_TITLE)" $(PAGE_FLAGS) \
+	    --embed $(HOST_PAYLOAD_VIRTUAL)=$(HOST_PAYLOAD) -o $(CURDIR)/$(HOST_POOPS)
+	$(PYTHON) $(LOADER)/tools/build_host.py \
+	    --page index.html=$(HOST_RELAPSE) \
+	    --page poops.html=$(HOST_POOPS) \
+	    --version $(BUILD_VERSION) --name "PS5 WEBKIT AUTOLOADER" --output webkit-autoloader-host.py
 
-# Serve the autoloader frontend locally (browser preview) with the same
-# /app/ path mapping and version tokens as the real build.
-.PHONY: dev
-dev: relapse-prepare slopkit-prepare umtx2-prepare payload-deps
-	$(PYTHON) tools/dev_server.py
+dev: page
+	$(PYTHON) -m http.server 8123 --bind 127.0.0.1 --directory build/autoloader
 
 clean:
-	rm -rf $(FRONTEND_STAGE)
-	rm -f $(ELF) $(FILE_REGISTRY_H) $(FILE_REGISTRY_C) $(FILE_REGISTRY_STAMP)
-	rm -f $(WKAL_HOST) $(VERSION_HEADER)
+	rm -rf $(STAGE) build/autoloader build/host
+	rm -f $(ELF) $(REGISTRY) include/wkali_version.h webkit-autoloader-host.py
+	rm -f $(PAGE_CONFIG)
 
-.PHONY: all host dev clean relapse-prepare slopkit-prepare umtx2-prepare payload-deps
-
+.PHONY: all version print-version test test-native icons payload-deps page registry host dev clean

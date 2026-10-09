@@ -4,7 +4,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>WebKit Autoloader Installer v[[VERSION_PLACEHOLDER]] by PLK (built [[BUILD_TIME_PLACEHOLDER]])</title>
   <style>
     * {
@@ -84,7 +83,7 @@
       margin-bottom: 0.5rem;
     }
 
-    #progressWrap {
+    #progress {
       position: relative;
       width: 100%;
       max-width: 30rem;
@@ -112,7 +111,7 @@
       transition: transform 0.3s ease-out;
     }
 
-    #progressPct {
+    #percent {
       position: absolute;
       top: 0;
       left: 0;
@@ -232,7 +231,7 @@
       color: #e2e8f0;
     }
 
-    #choiceContainer {
+    #choice {
       margin-top: 1.5rem;
       width: 100%;
       max-width: 38rem;
@@ -240,7 +239,7 @@
       margin-right: auto;
     }
 
-    #choiceContainer[hidden] {
+    #choice[hidden] {
       display: none !important;
     }
 
@@ -321,6 +320,53 @@
       color: #cbd5e1;
       line-height: 1.5;
     }
+    [hidden] {
+      display: none !important;
+    }
+
+    main {
+      width: 100%;
+    }
+
+    #detail { white-space: pre-line; }
+
+    #status.success { color: #22c55e; }
+    #status.error { color: #ef4444; }
+    #progress.success #progressBar {
+      background: #22c55e;
+      background: -webkit-linear-gradient(90deg, #16a34a 0%, #22c55e 100%);
+    }
+    #progress.error #progressBar {
+      background: #ef4444;
+      background: -webkit-linear-gradient(90deg, #dc2626 0%, #ef4444 100%);
+    }
+    #progress.indeterminate #progressBar {
+      -webkit-animation: cachePulse 1.2s ease-in-out infinite alternate;
+      animation: cachePulse 1.2s ease-in-out infinite alternate;
+    }
+    @-webkit-keyframes cachePulse {
+      from { opacity: 0.35; }
+      to { opacity: 1; }
+    }
+    @keyframes cachePulse {
+      from { opacity: 0.35; }
+      to { opacity: 1; }
+    }
+
+    @media (max-width: 560px) {
+      body { height: auto; display: block; }
+      main { padding: 2rem 1rem; }
+      .choice-grid { -webkit-flex-direction: column; flex-direction: column; }
+      h1 { font-size: 2rem; }
+      #footer {
+        position: static;
+        width: 100%;
+        padding: 0 0.5rem 12px;
+        -webkit-transform: none;
+        transform: none;
+      }
+      #cacheCorruptOverlay .card { margin: 1rem; }
+    }
   </style>
 
 </head>
@@ -329,27 +375,27 @@
   <main>
     <img class="logo" src="/logo.svg" alt="WebKit Autoloader" />
     <h1>WebKit Autoloader Installer</h1>
-    <p id="status">Loading&hellip;</p>
-    <p id="detail"></p>
+    <p id="status">Caching content...</p>
+    <p id="detail">Please wait a moment. Do not close this page yet!</p>
 
-    <div id="choiceContainer" hidden>
+    <div id="choice" hidden>
       <div class="choice-grid">
-        <button type="button" class="choice-card" id="btnPoops">
+        <button type="button" class="choice-card" id="poops">
           <div class="choice-title">Poops</div>
           <div class="choice-fw">FW 7.00 &ndash; 12.00</div>
           <div class="choice-desc">Works completely offline. Does not require any network connection or active network interface.</div>
         </button>
-        <button type="button" class="choice-card" id="btnRelapse">
+        <button type="button" class="choice-card" id="relapse">
           <div class="choice-title">Relapse</div>
-          <div class="choice-fw">FW 7.00 &ndash; 13.60 (except 9.05, 11.40)</div>
+          <div class="choice-fw">FW 7.00 &ndash; 13.60</div>
           <div class="choice-desc">Requires an active network interface (Wi-Fi or Ethernet). Internet access is not required.</div>
         </button>
       </div>
     </div>
 
-    <div id="progressWrap" hidden>
+    <div id="progress" role="progressbar" aria-label="Cache download" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
       <div id="progressBar"></div>
-      <div id="progressPct">0%</div>
+      <div id="percent">0%</div>
     </div>
     <div id="logContainer" hidden></div>
 
@@ -357,493 +403,318 @@
 
   <footer id="footer">WebKit Autoloader Installer v[[VERSION_PLACEHOLDER]] by PLK (built [[BUILD_TIME_PLACEHOLDER]])<br />This project is free and open source: github.com/itsPLK/ps5-webkit-autoloader</footer>
 
-  <script>
-    (function () {
-      'use strict';
+  <div id="cacheCorruptOverlay" role="dialog" aria-modal="true" aria-labelledby="repairTitle" aria-describedby="repairMessage" hidden>
+    <div class="card">
+      <h2 id="repairTitle">WebKit cache appears corrupted</h2>
+      <p id="repairMessage">Clearing WebKit browser data may fix the issue. This removes AppCache, cookies, and local storage for the current user.</p>
+      <div class="actions">
+        <button type="button" id="repair" class="btn primary" hidden>Clear WebKit Data &amp; Retry</button>
+        <button type="button" id="cancelRepair" class="btn secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
 
-      function detectFirmware() {
-        var m = /PlayStation 5\/(\d+\.\d+)/.exec(navigator.userAgent);
-        if (!m) return null;
-        return { str: m[1], num: parseFloat(m[1]) };
+<script>
+(function () {
+  'use strict';
+  var status = document.getElementById('status');
+  var repair = document.getElementById('repair');
+  var cache = window.applicationCache;
+  var installing = false;
+  var failed = false;
+  var downloading = false;
+  var version = '[[VERSION_PLACEHOLDER]]';
+  var progress = document.getElementById('progress');
+  var percent = document.getElementById('percent');
+  var choice = document.getElementById('choice');
+  var cacheReady = false;
+  var detail = document.getElementById('detail');
+  var progressBar = document.getElementById('progressBar');
+  var logContainer = document.getElementById('logContainer');
+  var repairOverlay = document.getElementById('cacheCorruptOverlay');
+  var logPos = 0;
+  var logXhr = null;
+  var logsStopped = false;
+
+  function setProgress(value) {
+    progress.className = '';
+    progress.setAttribute('aria-valuenow', value);
+    progressBar.style.webkitTransform = 'scaleX(' + value / 100 + ')';
+    progressBar.style.transform = 'scaleX(' + value / 100 + ')';
+    percent.textContent = value + '%';
+  }
+
+  function appendLog(message) {
+    logContainer.hidden = false;
+    logContainer.textContent += message;
+    logContainer.scrollTop = logContainer.scrollHeight;
+  }
+
+  function stopLogs() {
+    logsStopped = true;
+    if (logXhr) logXhr.abort();
+  }
+
+  function pollLogs() {
+    if (logsStopped) return;
+    logXhr = new XMLHttpRequest();
+    logXhr.open('GET', '/logs?pos=' + logPos, true);
+    logXhr.timeout = 5000;
+    logXhr.onload = function () {
+      if (logsStopped) return;
+      if (logXhr.status === 200) {
+        if (logXhr.responseText) appendLog(logXhr.responseText);
+        var nextPos = parseInt(logXhr.getResponseHeader('X-Log-Pos'), 10);
+        if (!isNaN(nextPos)) logPos = nextPos;
       }
+      setTimeout(pollLogs, logXhr.status === 200 ? 100 : 1000);
+    };
+    logXhr.onerror = logXhr.ontimeout = function () {
+      if (!logsStopped) setTimeout(pollLogs, 1000);
+    };
+    logXhr.send();
+  }
 
-      var statusEl = document.getElementById('status');
-      var detailEl = document.getElementById('detail');
-      var choiceContainer = document.getElementById('choiceContainer');
-      var btnPoops = document.getElementById('btnPoops');
-      var btnRelapse = document.getElementById('btnRelapse');
-      var progressWrap = document.getElementById('progressWrap');
-      var progressBar = document.getElementById('progressBar');
-      var progressPct = document.getElementById('progressPct');
-      var completed = false;
-      var isDownloading = false;
-      var isRetry = false;
-      var currentUid = '';
-      var chosenExploit = '';
-      var fwParam = '';
-      var simulateCorrupt = false;
-      var corruptionPromptShown = false;
+  document.getElementById('cancelRepair').onclick = function () {
+    repairOverlay.hidden = true;
+  };
 
-      (function () {
-        var params = new URLSearchParams(window.location.search);
-        isRetry = params.get('retry') === '1';
-        currentUid = params.get('uid') || '';
-        chosenExploit = params.get('exploit') || '';
-        fwParam = params.get('fw') || '';
-        /* Test hook: ?simulate=corrupt forces the corruption prompt without
-         * needing a real AppCache error (e.g. for quick UI testing in a
-         * desktop browser via `make dev`). */
-        simulateCorrupt = params.get('simulate') === 'corrupt';
-      })();
+  // Two keys, on this origin, which the homescreen app shares:
+  //   wkal_exploit  the chain of the last install that actually completed. The
+  //                 pointer reads this, so a new choice never clears it.
+  //   wkal_pending  the chain being installed right now, discarded if the
+  //                 install does not finish.
+  // Both chain pages are cached either way, so changing either costs nothing and
+  // invalidates nothing.
+  function readKey(key) {
+    try { return window.localStorage.getItem(key); } catch (error) { return null; }
+  }
+  function writeKey(key, value) {
+    try {
+      if (value === null) window.localStorage.removeItem(key);
+      else window.localStorage.setItem(key, value);
+    } catch (error) { }
+  }
+  function valid(chain) { return chain === 'poops' || chain === 'relapse'; }
 
-      /* Firmware support definitions:
-         - <= 5.50: umtx2
-         - 7.00 - 12.00: poops
-         - 7.00 - 13.60 (except 9.05, 11.40): relapse */
-      function isUmtx2Supported(num) {
-        var n = typeof num === 'number' ? num : parseFloat(num);
-        return n > 0 && n <= 5.50;
-      }
+  var installed = readKey('wkal_exploit');
+  if (!valid(installed)) installed = null;
+  var picked = readKey('wkal_pending');
+  if (!valid(picked)) picked = null;
 
-      function isPoopsSupported(num) {
-        var n = typeof num === 'number' ? num : parseFloat(num);
-        return n >= 7.00 && n <= 12.00;
-      }
+  var match = /PlayStation 5\/(\d+\.\d+)/.exec(navigator.userAgent);
+  var fw = match ? parseFloat(match[1]) : 0;
+  var hasPoops = fw >= 7 && fw <= 12;
+  var hasRelapse = fw >= 7 && fw <= 13.60 && fw !== 9.05 && fw !== 11.40;
 
-      function isRelapseSupported(num, str) {
-        var n = typeof num === 'number' ? num : parseFloat(num);
-        var s = str || (typeof num === 'string' ? num : '');
-        var isExcluded = (s === '9.05' || s === '11.40' ||
-                          Math.abs(n - 9.05) < 0.001 || Math.abs(n - 11.40) < 0.001);
-        return n >= 7.00 && n <= 13.60 && !isExcluded;
-      }
+  var params = new URLSearchParams(location.search);
+  var asked = params.get('exploit');
+  if (valid(asked)) {
+    // This is the reload that follows a choice. The server only serves the
+    // manifest attribute when the request carries a supported one, so reaching
+    // here means caching can start. Record the intent as pending; it only becomes
+    // the installed chain once /install succeeds.
+    picked = asked;
+    writeKey('wkal_pending', asked);
+  }
 
-      var fw = detectFirmware();
-      var fwStr = fw ? fw.str : fwParam;
-      var fwNum = fw ? fw.num : (fwParam ? parseFloat(fwParam) : 0);
-      var hasUmtx2 = isUmtx2Supported(fwNum);
-      var hasPoops = isPoopsSupported(fwNum);
-      var hasRelapse = isRelapseSupported(fwNum, fwStr);
-      var isUnsupported = fwNum > 0 && !hasUmtx2 && !hasPoops && !hasRelapse;
-      var isDualSupported = (hasPoops && hasRelapse) || (!fw && !fwParam);
-      var needsChoice = isDualSupported && !chosenExploit;
+  // A chain this firmware cannot run is not a usable choice.
+  if (picked === 'poops' && !hasPoops) picked = null;
+  if (picked === 'relapse' && !hasRelapse) picked = null;
+  if (installed === 'poops' && !hasPoops) installed = null;
+  if (installed === 'relapse' && !hasRelapse) installed = null;
 
-      function chooseExploit(choice) {
-        if (btnPoops) btnPoops.disabled = true;
-        if (btnRelapse) btnRelapse.disabled = true;
-        statusEl.textContent = 'Selected ' + (choice === 'poops' ? 'Poops' : 'Relapse') + '...';
-        detailEl.textContent = 'Preparing cache download...';
-        try {
-          localStorage.setItem('wkal_exploit', choice);
-        } catch (e) { }
-        var p = new URLSearchParams(window.location.search);
-        p.set('exploit', choice);
-        window.location.replace(window.location.pathname + '?' + p.toString());
-      }
+  var unsupported = !!match && !hasPoops && !hasRelapse;
+  // Firmware with only one usable chain needs no question: the server serves
+  // this page with its manifest attribute straight away, so record the intent.
+  if (!unsupported && !picked) {
+    var single = hasPoops && !hasRelapse ? 'poops' : hasRelapse && !hasPoops ? 'relapse' : null;
+    if (single) {
+      picked = single;
+      writeKey('wkal_pending', single);
+    }
+  }
+  // Ask whenever the firmware supports both chains and this request carries no
+  // choice, exactly as before the refactor. The server withholds the manifest
+  // attribute in that state, so nothing downloads while the buttons are up.
+  var dualSupported = (hasPoops && hasRelapse) || !match;
+  var needsChoice = !unsupported && dualSupported && !asked;
 
-      if (btnPoops) {
-        btnPoops.addEventListener('click', function () {
-          chooseExploit('poops');
-        });
-      }
-      if (btnRelapse) {
-        btnRelapse.addEventListener('click', function () {
-          chooseExploit('relapse');
-        });
-      }
+  function showChoice(message) {
+    status.textContent = 'Select Exploit';
+    detail.textContent = (match ? 'Firmware ' + match[1] : 'Your firmware') +
+      ' supports both Poops and Relapse.\n' + message;
+    choice.hidden = false;
+    if (installed) document.getElementById(installed).className += ' selected';
+  }
 
-      var logContainer = document.getElementById('logContainer');
-      var seenLogs = "";
+  function choose(chain) {
+    document.getElementById('poops').disabled = true;
+    document.getElementById('relapse').disabled = true;
+    // Recorded as pending on this origin, which the homescreen app shares, so
+    // the intent survives the reboot. It becomes the installed chain only once
+    // /install succeeds. Then reload with the choice in the query string: the
+    // server serves the entry page without its manifest attribute until a
+    // supported choice is present, so this reload is what starts the cache.
+    writeKey('wkal_pending', chain);
+    picked = chain;
+    status.textContent = 'Selected ' + (chain === 'poops' ? 'Poops' : 'Relapse') + '...';
+    detail.textContent = 'Preparing cache download...';
+    params.set('exploit', chain);
+    location.replace(location.pathname + '?' + params.toString());
+  }
+  document.getElementById('poops').onclick = function () { choose('poops'); };
+  document.getElementById('relapse').onclick = function () { choose('relapse'); };
 
-      function appendLog(msg) {
-        if (needsChoice || isUnsupported) return;
-        logContainer.hidden = false;
-        var div = document.createElement('div');
-        div.textContent = msg;
-        logContainer.appendChild(div);
-        logContainer.scrollTop = logContainer.scrollHeight;
-      }
+  // offerRepair defaults to true; pass false to report a failure without
+  // pointing at clearing WebKit data, which is the wrong remedy for anything
+  // that is not a genuine half-downloaded cache.
+  function fail(message, offerRepair) {
+    failed = true;
+    stopLogs();
+    status.textContent = message;
+    status.className = 'error';
+    detail.textContent = '';
+    progress.className = 'error';
+    logContainer.className = 'error';
+    repair.hidden = offerRepair === false;
+    repairOverlay.hidden = repair.hidden;
+    if (!repair.hidden) repair.focus();
+  }
 
+  function install() {
+    if (failed || cacheReady) return;
+    cacheReady = true;
+    setProgress(100);
+    maybeInstall();
+  }
 
-      var logPos = 0;
-      var logXhr = null;
+  // Caching and the choice can finish in either order; both are needed.
+  function maybeInstall() {
+    if (!cacheReady || failed || installing) return;
+    if (!picked) return;
+    installing = true;
+    status.textContent = 'Installing homescreen shortcut...';
+    detail.textContent = 'The offline cache is ready. Keep this page open.';
+    // Check the active cache before creating its homescreen shortcut.
+    fetch('/app/' + version + '/__complete__')
+      .then(function (response) { return response.text(); })
+      .then(function (marker) {
+        if (marker.trim() !== version) throw new Error('Cache incomplete. Run the installer again.');
+        return fetch('/install');
+      })
+      .then(function (response) {
+        if (!response.ok) throw new Error('Install failed. Run the installer again.');
+        // Only now is this the installed chain. Until this point the previous
+        // install is still intact and still usable, which is why the choice was
+        // never cleared on the way in.
+        writeKey('wkal_exploit', picked);
+        writeKey('wkal_pending', null);
+        stopLogs();
+        status.textContent = 'Installed successfully';
+        status.className = 'success';
+        progress.className = 'success';
+        detail.textContent = 'Reboot, then open WebKit Autoloader from the homescreen. You can close this page.';
+      })
+      .catch(function (error) { fail(error.message); });
+  }
 
-      function pollLogs() {
-        if (needsChoice || isUnsupported) return;
-        logXhr = new XMLHttpRequest();
-        logXhr.open('GET', '/logs?pos=' + logPos, true);
-        logXhr.onreadystatechange = function () {
-          if (logXhr.readyState === 4) {
-            if (logXhr.status === 200) {
-              var newLogs = logXhr.responseText;
-              if (newLogs.length > 0) {
-                var lines = newLogs.split('\n');
-                for (var i = 0; i < lines.length; i++) {
-                  if (lines[i].trim() !== '') appendLog(lines[i]);
-                }
-              }
-              var newPosStr = logXhr.getResponseHeader("X-Log-Pos");
-              if (newPosStr) {
-                logPos = parseInt(newPosStr, 10);
-              }
-              // Add a slight delay before reconnecting to reduce server load
-              setTimeout(pollLogs, 100);
-            } else {
-              // Server is down or error
-              if (completed) return; // Stop polling completely if we finished
-              setTimeout(pollLogs, 1000);
-            }
-          }
-        };
-        logXhr.send();
-      }
-      // Start the long-polling loop only when caching (not on choice, not on unsupported)
-      if (!needsChoice && !isUnsupported) {
-        pollLogs();
-      }
+  repair.onclick = function () {
+    if (!confirm('Clear WebKit browser data and retry the installation?')) return;
+    stopLogs();
+    repair.disabled = true;
+    status.textContent = 'Clearing WebKit data...';
+    document.getElementById('repairMessage').textContent = status.textContent;
+    fetch('/clear-webkit-data').then(function (response) {
+      if (!response.ok) throw new Error('Could not clear WebKit data. Run the installer again.');
+      status.textContent = 'WebKit data cleared. The installer will reopen this page.';
+      document.getElementById('repairMessage').textContent = status.textContent;
+    }).catch(function (error) {
+      status.textContent = error.message;
+      document.getElementById('repairMessage').textContent = error.message;
+      repair.disabled = false;
+    });
+  };
 
+  if (unsupported) {
+    status.textContent = 'Unsupported firmware ' + match[1];
+    status.className = 'error';
+    detail.textContent = 'Supported: 7.00–12.00 via Poops, 7.00–13.60 via Relapse (except 9.05 and 11.40).';
+    progress.hidden = true;
+    percent.hidden = true;
+    fetch('/exit').catch(function () { });
+    return;
+  }
+  if (needsChoice) {
+    // Nothing is downloading behind this prompt: the server withholds the
+    // manifest attribute until a choice comes back in the query string.
+    showChoice(installed
+      ? 'Choose an exploit. Currently installed: ' + installed + '.'
+      : 'Select which one to install:');
+    progress.hidden = true;
+    percent.hidden = true;
+    document.getElementById(installed || 'poops').focus();
+    return;
+  }
 
-      var probeOk = false;
-
-
-      var AUTOLOADER_URL = '/app/index.html';
-
-      function setProgress(pct) {
-        progressBar.style.webkitTransform = 'scaleX(' + pct / 100 + ')';
-        progressBar.style.transform = 'scaleX(' + pct / 100 + ')';
-        progressPct.textContent = pct + '%';
-      }
-
-      function setInstalled() {
-        statusEl.textContent = 'Installed successfully';
-        statusEl.style.color = '#22c55e';
-        progressBar.style.background = '-webkit-linear-gradient(90deg, #16a34a 0%, #22c55e 100%)';
-        detailEl.textContent = 'The WebKit Autoloader shortcut is now on your PS5 homescreen. You can close this page.';
-        setProgress(100);
-      }
-
-      function setFailed() {
-        statusEl.textContent = 'Install failed';
-        statusEl.style.color = '#ef4444';
-        progressBar.style.background = '-webkit-linear-gradient(90deg, #dc2626 0%, #ef4444 100%)';
-        detailEl.textContent = 'The app could not be installed. Close this page and re-run the installer.';
-      }
-
-      function setSlow() {
-        statusEl.textContent = 'Caching is taking unusually long';
-        detailEl.textContent = 'The shortcut is only created after the cache finishes. If this never completes, close the browser and re-run the installer.';
-      }
-
-      function setCaching() {
-        statusEl.textContent = 'Caching content...';
-        detailEl.textContent = 'Please wait a moment. Do not close this page yet!';
-        progressWrap.hidden = false;
-        if (!logXhr) {
-          pollLogs();
-        }
-      }
-
-      function goToAutoloader() {
-        window.location.replace(AUTOLOADER_URL);
-      }
-
-      function probeServer() {
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', '/version', true);
-        xhr.timeout = 1000;
-        xhr.onreadystatechange = function () {
-          if (xhr.readyState === 4) {
-            if (xhr.status === 200) {
-              var hdrUid = xhr.getResponseHeader("X-User-Id");
-              if (hdrUid) currentUid = hdrUid;
-              probeOk = true;
-              setCaching();
-            } else {
-              goToAutoloader();
-            }
-          }
-        };
-        xhr.onerror = function () {
-          goToAutoloader();
-        };
-        xhr.ontimeout = function () {
-          goToAutoloader();
-        };
-        xhr.send();
-      }
-
-      function installApp() {
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', '/install', true);
-        xhr.timeout = 30000;
-        xhr.onreadystatechange = function () {
-          if (xhr.readyState === 4) {
-            if (xhr.status === 200) {
-              setInstalled();
-            } else {
-              setFailed();
-            }
-          }
-        };
-        xhr.onerror = function () {
-          setFailed();
-        };
-        xhr.ontimeout = function () {
-          setFailed();
-        };
-        xhr.send();
-      }
-
-      function maybeInstall() {
-        if (completed) {
-          return;
-        }
-        completed = true;
-        installApp();
-      }
-
-      function setCacheCorrupted() {
-        if (corruptionPromptShown) {
-          return;
-        }
-        corruptionPromptShown = true;
-        completed = true;
-        progressWrap.hidden = true;
-        logContainer.hidden = true;
-        statusEl.textContent = 'Caching failed';
-        detailEl.textContent = '';
-
-        var overlay = document.createElement('div');
-        overlay.id = 'cacheCorruptOverlay';
-
-        var card = document.createElement('div');
-        card.className = 'card';
-
-        var title = document.createElement('h2');
-        var msg = document.createElement('p');
-        var actions = null;
-
-        var webkitShellPath = '/user/home/' + (currentUid || '<userid>') + '/webkit/shell/';
-
-        if (isRetry) {
-          title.textContent = 'Cache issue persists';
-          msg.textContent = 'Clearing WebKit data from ' + webkitShellPath + ' didn\'t seem to fix the issue. You can close this page.';
-          var exitXhr = new XMLHttpRequest();
-          exitXhr.open('GET', '/exit', true);
-          exitXhr.send();
-        } else {
-          title.textContent = 'WebKit cache appears corrupted';
-          msg.textContent = 'Your PS5\'s WebKit browser data may be corrupted, preventing the cache from completing. Clearing it may fix the issue. ';
-          var strong = document.createElement('strong');
-          strong.textContent = 'This will remove all browser data in ' + webkitShellPath + ' (AppCache, cookies, local storage) for the current user.';
-          msg.appendChild(strong);
-
-          actions = document.createElement('div');
-          actions.className = 'actions';
-
-          var clearBtn = document.createElement('button');
-          clearBtn.className = 'btn primary';
-          clearBtn.textContent = 'Clear WebKit Data & Retry';
-          clearBtn.addEventListener('click', function () {
-            actions.hidden = true;
-            actions.style.display = 'none';
-            msg.textContent = 'Clearing data and restarting browser...';
-            var xhr = new XMLHttpRequest();
-            xhr.open('GET', '/clear-webkit-data', true);
-            xhr.timeout = 30000;
-            xhr.onreadystatechange = function () {
-              if (xhr.readyState === 4 && xhr.status !== 200) {
-                msg.textContent = 'Failed to clear WebKit data';
-                actions.hidden = false;
-                actions.style.display = '';
-              }
-            };
-            xhr.onerror = function () {
-              msg.textContent = 'Failed to clear WebKit data';
-              actions.hidden = false;
-              actions.style.display = '';
-            };
-            xhr.ontimeout = function () {
-              msg.textContent = 'Failed to clear WebKit data';
-              actions.hidden = false;
-              actions.style.display = '';
-            };
-            xhr.send();
-          });
-          actions.appendChild(clearBtn);
-
-          var cancelBtn = document.createElement('button');
-          cancelBtn.className = 'btn secondary';
-          cancelBtn.textContent = 'Cancel';
-          cancelBtn.addEventListener('click', function () {
-            msg.textContent = 'You can close this page. Re-run the installer ELF to try again.';
-            actions.hidden = true;
-            actions.style.display = 'none';
-            var xhr = new XMLHttpRequest();
-            xhr.open('GET', '/exit', true);
-            xhr.send();
-          });
-          actions.appendChild(cancelBtn);
-        }
-
-        card.appendChild(title);
-        card.appendChild(msg);
-        if (actions) {
-          card.appendChild(actions);
-        }
-        overlay.appendChild(card);
-        document.body.appendChild(overlay);
-      }
-
-      window.addEventListener('load', function () {
-        /* Test hook: ?simulate=corrupt forces the corruption prompt as if an
-         * AppCache error fired during download, and skips the probe/install
-         * polling so the prompt stays up for UI testing (e.g. make dev). */
-        if (simulateCorrupt) {
-          isDownloading = true;
-          setCacheCorrupted();
-          return;
-        }
-
-        if (needsChoice) {
-          statusEl.textContent = 'Select Exploit';
-          var fwDisplay = fw ? ('Firmware ' + fw.str) : (fwParam ? ('Firmware ' + fwParam) : 'Your firmware');
-          detailEl.textContent = '';
-          detailEl.appendChild(document.createTextNode(fwDisplay + ' supports both Poops and Relapse.'));
-          detailEl.appendChild(document.createElement('br'));
-          detailEl.appendChild(document.createTextNode('Select which one to install:'));
-          choiceContainer.hidden = false;
-          logContainer.hidden = true;
-          var storedPref = '';
-          try { storedPref = localStorage.getItem('wkal_exploit'); } catch (e) { }
-          if (storedPref === 'relapse' && btnRelapse) {
-            btnRelapse.classList.add('selected');
-            btnRelapse.focus();
-          } else if (storedPref === 'poops' && btnPoops) {
-            btnPoops.classList.add('selected');
-            btnPoops.focus();
-          } else if (btnPoops) {
-            btnPoops.focus();
-          }
-          return;
-        }
-
-        if (isUnsupported) {
-          statusEl.textContent = 'Unsupported firmware';
-          statusEl.style.color = '#ef4444';
-          var fwDisplay = fw ? ('Firmware ' + fw.str) : (fwParam ? ('Firmware ' + fwParam) : 'Your firmware');
-          detailEl.textContent = fwDisplay + ' is not supported (supported: 1.00–5.50 via umtx2, 7.00–12.00 via poops, 7.00–13.60 via relapse).';
-          return;
-        }
-
-        var effectiveExploit = '';
-        if (hasUmtx2) {
-          effectiveExploit = 'umtx2';
-        } else if (hasPoops && !hasRelapse) {
-          effectiveExploit = 'poops';
-        } else if (hasRelapse && !hasPoops) {
-          effectiveExploit = 'relapse';
-        } else if (hasPoops && hasRelapse) {
-          effectiveExploit = (chosenExploit === 'poops') ? 'poops' : 'relapse';
-        } else if (chosenExploit) {
-          effectiveExploit = chosenExploit;
-        }
-        if (effectiveExploit) {
-          try {
-            localStorage.setItem('wkal_exploit', effectiveExploit);
-          } catch (e) { }
-        }
-
-        probeServer();
-
-        /* The shortcut is created only once the AppCache is current, so the
-           installer never installs a partial cache. /install then both installs
-           the homescreen app and stops the server. */
-        var waitTimer = setInterval(function () {
-          if (completed) {
-            clearInterval(waitTimer);
-            return;
-          }
-          if (!probeOk) {
-            clearInterval(waitTimer);
-            goToAutoloader();
-            return;
-          }
-          if (!window.applicationCache) {
-            clearInterval(waitTimer);
-            maybeInstall();
-            return;
-          }
-          if (window.applicationCache.status === window.applicationCache.UPDATEREADY) {
-            clearInterval(waitTimer);
-            try {
-              window.applicationCache.swapCache();
-            } catch (e) { }
-            maybeInstall();
-            return;
-          }
-        }, 1000);
-
-        /* Safety cap — never leave the installer hanging on screen. It does NOT
-           install or exit: a partial cache must never create a shortcut, so the
-           user simply re-runs the installer if this never completes. */
-        setTimeout(function () {
-          if (!completed && probeOk) {
-            setSlow();
-          }
-        }, 120000);
-      });
-
-
-      if (window.applicationCache) {
-        window.applicationCache.addEventListener('checking', function () {
-          progressWrap.hidden = false;
-          appendLog("[AppCache] Checking for manifest...");
-        });
-        window.applicationCache.addEventListener('downloading', function () {
-          isDownloading = true;
-          appendLog("[AppCache] Downloading cache...");
-        });
-        window.applicationCache.addEventListener('progress', function (e) {
-          if (e.url) appendLog("[AppCache] Fetching: " + e.url);
-          if (e.total && e.total > 0) {
-            var pct = Math.min(99, Math.round((e.loaded / e.total) * 100));
-            setProgress(pct);
-          }
-        });
-        window.applicationCache.addEventListener('error', function (e) {
-          appendLog("[AppCache] Error occurred! Status: " + window.applicationCache.status);
-          logContainer.className = 'error';
-          if (isDownloading) {
-            setCacheCorrupted();
-          }
-        });
-        window.applicationCache.addEventListener('obsolete', function (e) {
-          appendLog("[AppCache] Manifest is obsolete.");
-        });
-        window.applicationCache.addEventListener('cached', function() {
-          isDownloading = false;
-          appendLog("[AppCache] Caching complete.");
-          maybeInstall();
-        });
-        window.applicationCache.addEventListener('noupdate', function() {
-          isDownloading = false;
-          appendLog("[AppCache] No update needed.");
-          maybeInstall();
-        });
-        window.applicationCache.addEventListener('updateready', function () {
-          isDownloading = false;
-          if (window.applicationCache.status === window.applicationCache.UPDATEREADY) {
-            try {
-              window.applicationCache.swapCache();
-            } catch (e) { }
-          }
-          appendLog("[AppCache] Update ready.");
-          maybeInstall();
-        });
-      }
-    })();
-  </script>
+  if (!cache) {
+    status.textContent = 'This browser does not support offline AppCache.';
+    detail.textContent = '';
+    progress.hidden = true;
+    return;
+  }
+  pollLogs();
+  cache.addEventListener('downloading', function () {
+    downloading = true;
+    appendLog('[AppCache] Downloading offline content...\n');
+  });
+  cache.addEventListener('progress', function (event) {
+    if (failed || cacheReady) return;
+    if (event.total > 0) {
+      var value = Math.min(99, Math.round(event.loaded * 100 / event.total));
+      setProgress(value);
+    } else {
+      progress.removeAttribute('aria-valuenow');
+      progress.className = 'indeterminate';
+      progressBar.style.webkitTransform = 'scaleX(1)';
+      progressBar.style.transform = 'scaleX(1)';
+      percent.textContent = 'Downloading...';
+    }
+  });
+  cache.addEventListener('cached', function () { downloading = false; install(); });
+  cache.addEventListener('noupdate', function () { downloading = false; install(); });
+  cache.addEventListener('updateready', function () {
+    // Once the cache is ready or the install has started, a late event is just
+    // in-flight noise and must not overwrite the success message.
+    if (installing || failed || cacheReady) return;
+    downloading = false;
+    // swapCache() throws InvalidStateError unless the cache is genuinely
+    // UPDATEREADY, which is not the case when an update finished having replaced
+    // nothing. Never fatal: install() re-reads the __complete__ marker, so an
+    // unswapped cache is still validated before the shortcut is created.
+    if (cache.status === cache.UPDATEREADY) {
+      try { cache.swapCache(); } catch (error) { /* already the active cache */ }
+    }
+    install();
+  });
+  cache.addEventListener('error', function () {
+    if (failed || cacheReady || installing) return;
+    // An error mid-download means a half-written cache, which clearing WebKit
+    // data can fix. An error during the manifest check does not.
+    if (downloading) fail('Cache download failed. Run the installer again or clear WebKit data.');
+    else fail('The offline cache could not be checked. Run the installer again.', false);
+  });
+  cache.addEventListener('obsolete', function () {
+    if (failed || cacheReady || installing) return;
+    status.textContent = 'The cached manifest was superseded. Re-run the installer to finish.';
+  });
+  setTimeout(function () {
+    if (!cacheReady && !failed) {
+      status.textContent = 'Caching is taking unusually long';
+      detail.textContent = 'Keep this page open or run the installer again.';
+    }
+  }, 120000);
+})();
+</script>
 </body>
-
 </html>

@@ -1,242 +1,202 @@
-# PS5 WebKit Autoloader: Architecture
+# WebKit Autoloader architecture
 
-A persistent entry point for PS5 payloads that runs a WebKit/kernel exploit chain
-and autoloads your payloads fully offline. Three exploit chains are bundled and
-selected by firmware:
+This repository installs an offline homescreen app and bundles a standalone HTML
+page built by `third_party/ps5-webkit-remote-loader`. Remote-loader owns WebKit,
+firmware offsets, the ROP worker, Poops, Relapse, and the standalone runtime.
+It also owns the shared native installer helpers and SDK Docker recipe. This
+repository provides `include/installer_config.h` for its app name, title ID,
+assets and log prefix. Remote-loader has no dependency on this repository.
+The installer has a small exploit chooser and cache progress bar. The exploit
+runs directly in the standalone page, without an iframe or generated-code patches.
 
-- **umtx2** (FW 1.00–5.50) — idlesauce umtx2 chain (`umtx2/`). Fully offline.
-- **poops** (FW 7.00–12.00) — slopkit poops chain (`slopkit/slopkit/poops.html`). Fully offline.
-- **relapse** (FW 7.00–13.60) — relapse chain (`relapse/`). Requires an active network interface.
+## Runtime
 
-On firmwares supported by both chains (7.00–12.00), the installer page asks the user
-before caching which chain to install: Poops (for fully offline support) or Relapse
-(newer chain; requires active Wi-Fi/Ethernet network interface).
+`tools/build_standalone.py` builds **one standalone page per chain**, and each
+page carries three ordinary payloads. The loader first prepares the WebKit memory
+primitive and ROP worker, then runs this queue:
 
-All chains converge on the same result: a `WKAL00001` homescreen app that runs the
-exploit, boots elfldr, and autoloads your payload through it.
+1. `elfldr-check.js` connects to `127.0.0.1:9021` without sending data. If a loader
+   accepts the connection, it requests `api.stopQueue()`, closes its socket, and
+   skips both remaining payloads. A refused connection allows the queue to proceed;
+   an unexpected probe or cleanup error stops it instead of retrying a kernel
+   exploit blindly. No kernel access is required for this check.
+2. `poops.js` (or `relapse.js`) runs unmodified from the submodule. It establishes
+   kernel access and brings up elfldr/kexp itself on port 9021.
+3. `autoload.js` then stages the bundled ELF into an anonymous mapping and streams
+   it to elfldr. It selects nothing: the page is already built for one chain.
 
-## Repository layout
+The payload queue runs in order: `[1/3] elfldr-check.js`, `[2/3] poops.js`
+(or `relapse.js`), then `[3/3] autoload.js`. Each payload runs directly in the page
+context without wrappers.
 
-| Path | Purpose |
-|---|---|
-| `frontend/autoloader/` | The autoloader UI, served by both the installer and the PC host |
-| `frontend/installer-page/` | Wrapper page that drives the one-time AppCache caching |
-| `frontend/pointer/` | Stable `/app/index.html` entry that verifies the cache and points into the versioned app dir |
-| `pc-host/` | The PC host script (`host.py`) + overrides for the bootstrap flow |
-| `src/` | Native installer ELF (HTTP server, app installer, browser launcher) |
-| `include/` | Headers, incl. generated `wkali_version.h` and `file_registry.{h,c}` |
-| `patches/` | The relapse, slopkit, and umtx2 autoloader patch files |
-| `tools/` | Build, version, icon, registry scripts, and dependency downloader |
-| `assets/` | Icon source and PS5 app metadata templates |
-| `third_party/` | `relapse`, `slopkit`, `umtx2`, `ps5-elfldr` and `ps5-unified-autoloader` submodules (pinned) |
+The installation flow is choose, then cache:
 
-## Two setup flows
+1. The installer page loads with no `?exploit=`. On firmware that supports both
+   chains it shows the prompt, records nothing, and — importantly — registers no
+   AppCache handlers, so nothing downloads behind the buttons.
+2. The server withholds `manifest="/cache.appcache"` from the entry page until the
+   request carries a supported `?exploit=`, because AppCache starts on that
+   attribute and JS runs too late to stop it. Firmware with only one chain needs
+   no question, so it is served with the attribute immediately.
+3. Choosing records `localStorage.wkal_pending` and reloads with the choice. That
+   reload is what starts the cache.
+4. Once the cache completes, the page checks the `__complete__` marker and calls
+   `/install`. Only on success is `wkal_pending` promoted to `wkal_exploit` and
+   cleared.
 
-**Installer ELF (already jailbroken).** Send `webkit-autoloader-installer_v*.elf` to the console
-(elfldr or Payload Manager). It opens the browser once to cache the frontend via AppCache,
-creates the `WKAL00001` app only after that cache succeeds, then exits. From then on the app
-runs the chain offline from the cache. On FW 7.00–12.00, it prompts the user to pick Poops or
-Relapse before starting the cache.
+Two keys, so the one the pointer reads means "an install completed". A choice is
+never written over the installed one on the way in, so a failed install leaves the
+previous autoloader intact and launchable; only a finished `/install` changes what
+is installed. This is also what makes "Currently installed: X" in the prompt
+truthful rather than "whatever was last clicked".
 
-**PC host (not jailbroken).** Run `webkit-autoloader-host_v*.py` / `.exe` on a PC, point the
-console's DNS at it, and open the User's Guide. The host spoofs `manuals.playstation.net`
-(DNS + self-signed HTTPS) and serves the same frontend, but autoloads the **installer ELF**
-instead of the unified-autoloader — so this flow installs the homescreen app.
+Both chain pages are cached once caching starts, so switching later costs nothing
+and never re-downloads anything.
 
-## Frontend (`frontend/autoloader/`)
+The server's part is decided strictly per request, from the query string and the
+User-Agent, without maintaining server-side state or remembered choices.
 
-- A log terminal and a progress bar. The exploit runs in a **hidden**
-  same-origin iframe. On load, `app.js` picks the chain from the firmware in
-  the user-agent (`PlayStation 5/x.xx`): **umtx2** for <=5.50, **poops** for 7.00–12.00,
-  and **relapse** for 7.00–13.60 (except 9.05 and 11.40). On dual-compatible firmwares,
-  the user's installed choice is loaded (defaulting to relapse).
-  The iframe element is `display: none`; its document still runs the chain and sends
-  log and completion messages to the parent.
-- A `FORCE_EXPLOIT` build-time override (`auto | umtx2 | poops | relapse`; or a `?force=`
-  query) bypasses the table so a specific chain can be exercised on any firmware; the
-  exploit's own firmware guard still applies.
-- umtx2 auto-runs its chain via the `on_load_autorun` sessionStorage key (set by
-  `app.js` before arming); poops and relapse auto-run on load from their query parameters.
-- The exploit iframe is armed immediately on page load without any delay, so the
-  chain's log streams directly into the loader UI.
-- `app.js` mirrors each chain's console log and receives the `?autoload` result
-  via `postMessage`. Relapse milestones advance the progress bar, while Poops stages
-  advance progress correspondingly.
-- `payload.elf` is a virtual name: the PC host serves the installer ELF there, the homescreen app
-  serves the real unified-autoloader. All exploits autoload the same `payload.elf`. umtx2 (FW
-  1.00–5.50) boots its **own bundled elfldr** (`/app/<version>/umtx2/payloads/elfldr-ps5.elf`, kept
-  from the umtx2 submodule like stock umtx2); poops (7.00–12.00) and relapse (7.00–13.60) boot
-  the **shared elfldr** (`/app/<version>/shared/elfldr-ps5.elf`).
+**Both chain pages are always cached (~9.4 MB uncompressed).** The cached bytes
+therefore do not depend on the choice, so switching chains changes one storage key
+and touches nothing in the AppCache — there is no cache to invalidate. This is
+deliberate and load bearing: caching both pages at once makes subsequent chain
+switches instant and offline, with zero network or cache invalidation risk.
 
+The server's only selection logic is deciding per request whether to include the
+`manifest="/cache.appcache"` attribute on `/index.html`. It stores no selection state
+in memory or C variables.
 
-## Native installer (`src/`)
+The upstream firmware table rejects unsupported firmware before running WebKit.
+Supported versions are the remote-loader offset tables in the 7.00–13.60 range.
+Poops works without an active network interface; Relapse needs a connected local
+network interface, but no Internet access.
 
-A PS5 payload running a `libmicrohttpd` server on port **18181**:
+## Build
 
-1. Serves the staged frontend: installer-page at `/`, the pointer at `/app/index.html`
-   and the versioned autoloader at `/app/<version>/`.
-2. Frontend files are embedded **compressed** (raw DEFLATE via `src/inflate.c`, the vendored
-   puff) and inflated on demand.
-3. The browser caches everything through `cache.appcache`, then hits `/install`. The ELF
-   installs/updates the `WKAL00001` homescreen app and shuts down only after the cache is
-   confirmed complete. If the user closes the browser mid-load, no `/install` is ever hit,
-   so no shortcut is created/updated and the previously-installed version stays untouched (the
-   installer process simply keeps running until a subsequent run kills it). The master URL
-   carries `?v=<version>` so stale cached entries are avoided.
-4. The app's `deeplinkUri` is the stable pointer `http://127.0.0.1:18181/app/index.html`.
+`Makefile` calls the upstream builders without transforming their output:
 
-### Cache layout and partial-cache protection
+- `make page`: verify/download dependencies, then call `tools/build_standalone.py`
+  once per chain with `payloads/elfldr-check.js`, that chain's exploit, then
+  `payloads/autoload.js::<payload_elf>`, plus
+  `--elfldr` and `--embed <payload_elf>=<file>`. Outputs: `build/autoloader/{poops,relapse}.html`.
+  The exploits are submodule paths, resolved relative to the submodule root.
+- `make all`: stage the installer page, stable pointer and generated HTML; generate
+  a compressed C registry and AppCache manifest; compile `installer.elf` with the
+  PS5 SDK. Both installers compile remote-loader's `installer/common` sources;
+  product-specific main loops and HTTP routing stay in their own repositories.
+  Docker provides the SDK and libmicrohttpd from remote-loader's Docker recipe.
+- `make host HOST_PAYLOAD=<installer.elf>`: build standalone setup pages for both
+  chains (Relapse and Poops) embedding that installer, then package them via
+  remote-loader's `tools/build_host.py` into `webkit-autoloader-host.py`. At runtime,
+  the host serves Relapse by default and automatically routes firmwares incompatible
+  with Relapse (9.05, 11.40) to Poops.
+  Use a versioned ELF path outside the native `installer.elf` target when building
+  the host on a machine without the SDK.
+- `make dev`: serve the generated chain pages on localhost:8123.
+- `make clean`: remove generated pages, registry and unversioned artifacts; retain
+  verified downloads in `build/deps/` for offline rebuilds.
 
-The staged autoloader lives under `/app/<full-version>/` (see the Makefile staging rule), so
-every build's assets have version-unique URLs. This, plus two generated extras, protects the
-cache against a user closing the browser mid-download:
+`PAGE_CSS` and `PAGE_JS` default to `frontend/autoloader/style.css` and `app.js`,
+providing the log panel, progress bar, and status footer on both chain pages and the
+PC setup page. The script moves the existing console into the panel and observes
+its log lines for progress; it never wraps the exploit or replaces its APIs.
+Completion waits for the queue summary, including payload cleanup. An existing
+ELF loader is shown as already running, and failures stay visible in the log.
+`tools/gen_version.py --page-config` supplies the footer's version and build time
+as an inline startup script. No additional network resources are needed.
 
-- **Versioned app dir** (`/app/<version>/…`): an interrupted *update* can never clobber the
-  files the currently-installed version points at — they live at their own URLs. An
-  interrupted first cache never creates a shortcut at all, because the app is only installed
-  after `/install` fires.
-- **Pointer page** (`/app/index.html`, generated from `frontend/pointer/`): the stable
-  deeplink target. It fetches the version's `__complete__` marker and only then redirects
-  into `/app/<version>/index.html`; on a mismatch it shows "Cache incomplete" instead of
-  loading a broken chain.
-- **`__complete__` marker** (`/app/<version>/__complete__`, content = the full version): the
-  **last** entry of the AppCache `CACHE:` section. If the marker is cached (with matching
-  content), every file listed before it was downloaded — so the pointer can only ever point
-  at a fully-cached directory.
+Override `PAGE_CSS` and `PAGE_JS` to pass other files to the upstream HTML builder.
+CSS is embedded after the default styles in the
+head. Each JavaScript file runs in its own async function before module boot and
+the exploit; use top-level `await` or return a promise for work that must finish
+first. Multiple files run in argument order, and startup errors stop boot.
 
-Because the exploit iframe URLs, `payloads/`, `shared/`, relapse's `../../` paths and the app
-entry page's own `style.css`/`app.js`/`favicon.svg` references are all relative
-(never `/app/...` absolute), `app.js`, the exploit patches and the app pages are untouched by
-the versioned layout and resolve correctly under `/app/<version>/`, on the PC host and in the
-dev server.
+```sh
+make page PAGE_CSS=path/to/theme.css PAGE_JS=path/to/setup.js
+# Or build the upstream plain console:
+make page PAGE_CSS= PAGE_JS=
+```
 
-## PC host (`pc-host/host.py`)
+The variables accept whitespace-separated lists of paths relative to the working
+directory. Startup scripts can prepare the DOM and share state through `window`;
+they have no payload `api`. Inline assets needed during offline startup. This
+keeps appearance changes in CSS/JS files here instead of rewriting generated HTML
+or changing the exploit sources.
 
-- Binds DNS port 53 and HTTPS port 443 (both required). A self-signed certificate is generated
-  on the fly with `openssl`.
-- Redirects `manuals.playstation.net` to the PC and blocks other telemetry domains; the User's
-  Guide URL is mapped to the served frontend.
-- The frontend (+ filtered exploit assets) is embedded in the script as a base64 zip and served
-  from memory. `HOST_PAYLOAD` replaces the autoload payload with the installer ELF.
+`tools/download_deps.sh` downloads the pinned itsPLK elfldr and unified-autoloader
+release assets, caching verified digest sidecars. kexp is the binary bundled by
+remote-loader. Submodule initialization is non-recursive: remote-loader's nested
+copy of this repository is not a build input.
 
-## Build system
+`build_release.sh` pins `BUILD_VERSION` once across Docker, HTML/cache generation,
+and PC host packaging, then writes versioned ELF/Python artifacts. GitHub Actions
+also packages the Python host as a Windows executable.
 
-- `make`: `all` (ELF), `host` (standalone host script), `dev` (local preview server),
-  `relapse-prepare`, `umtx2-prepare`, `payload-deps`, `version`, `icons`, `clean`.
-- `tools/check_exploit_js.py` parse-checks the vendored exploit sources; it runs as the last
-  step of `relapse-prepare` / `umtx2-prepare` so a patch that only breaks at runtime is
-  caught at build time.
-- `tools/gen_file_registry.py` walks the staged `frontend/dist/`, compresses each file (raw
-  DEFLATE) and emits the C registry + the AppCache manifest. It pins the version from
-  the staging handoff (`dist/VERSION`), writes the `__complete__` marker, substitutes the tokens
-  in the pointer page and the app's versioned `index.html`, lists the pointer and marker LAST
-  in the manifest, and replaces the `[[EXPLOIT_MODE]]` token in `app.js` from the
-  `FORCE_EXPLOIT` env (`auto | umtx2 | relapse`, default `auto`).
-- `build_release.sh` builds the ELF in a Dockerized SDK and the host script; CI
-  (`.github/workflows/release.yml`) produces the versioned artifacts and the Windows `.exe`.
-  `FORCE_EXPLOIT` is forwarded into the Docker build explicitly.
+Remote-loader changes live on `refactor/minimal-autoloader`: `--embed URL=FILE`
+adds inline fetch resources, `--elfldr [URL=]FILE` overrides the loader binary without
+editing generated HTML, and the host builder accepts `--page` and `--name`.
+Its probe verifies embedded file sizes and input digests, including external assets.
 
-## Relapse integration
+The target payload ELF (`ps5-unified-autoloader` for offline autoloader pages, or
+the installer ELF for the PC setup host) is embedded via `--embed`.
 
-`relapse` is a pinned, **pristine** submodule. The build copies it to the gitignored
-`frontend/autoloader/relapse/` and applies `patches/relapse-autoload.patch` there
-(`tools/apply_relapse_patch.sh`, run automatically by the Makefile).
+## Offline installation
 
-The build copy is pruned to the files needed at runtime: the README, upstream dev server and
-bundled payloads are removed completely. Both the **shared** elfldr and **shared** kexp binary
-come from the app-level `shared/` directory, and Relapse sends the app's single `payload.elf` from
-the app-level `payloads/` directory. This lets the registry and host zip include staged files
-without per-exploit payload filters or duplicated binaries.
+The installer serves on `127.0.0.1:18181` only. On dual-chain firmwares, its browser
+page prompts the user to select Poops or Relapse before starting caching. Choosing
+reloads with `?exploit=<chain>`, allowing the HTTP server to include the manifest
+attribute. The page displays AppCache download progress and calls `/install` once
+caching completes (`cached`, `noupdate`, or `updateready`). Upon successful install,
+`wkal_pending` is promoted to `wkal_exploit` in `localStorage`. The installer validates
+the version marker before creating the shortcut. Cache errors leave the installer
+running and offer a user-confirmed WebKit-data clear; the native installer then
+reopens the browser to retry.
 
-The patch (in `relapse/src/main.js` and `relapse/src/kexp.js`):
+The cache layout is:
 
-- Before running the kernel exploit, once the WebKit ROP worker is available,
-  probe `127.0.0.1:9021`. If elfldr already accepts connections, abort and report
-  failure without starting another elfldr or sending the autoload payload.
-- The app launches the page with `?autoload=payload.elf`. Once the kernel chain has started
-  elfldr on port 9021, it sends that same `payload.elf` from `../../payloads/` and posts
-  `{type:"wkal", kind:"autoload", ok, bytes}` (or `{ok:false, why}`) to the parent page. This
-  replaces upstream's "press R2 for kstuff / shadowmountplus / etaHEN" step; without
-  `?autoload=`, the stock R2 path remains intact. If the chain never gets elfldr up, failure is
-  reported rather than left pending.
-- Asset paths remain relative to the exploit page: the shared kexp and elfldr come from
-  `../shared/`, and `payload.elf` comes from `../payloads/`.
-- Replaces upstream in-memory binary patching with zero binary patching: pre-resolved symbols are
-  passed via the standard `KXP2` API table extension in `payload_args_t` (identical to Poops),
-  executing `kexp-ps5.bin` untouched.
-- Removes the per-request offsets cache-buster. AppCache keys include query strings, so the
-  upstream `?v=` + `Date.now()` URL would miss the manifest. The versioned app directory already
-  provides a stable cache key for each build.
+```text
+/index.html                  installer/cache entry
+/logo.svg                    installer logo asset
+/cache.appcache              generated manifest
+/app/index.html              stable homescreen pointer
+/app/<version>/poops.html    chain page: elfldr-check.js, poops.js, then autoload.js
+/app/<version>/relapse.html  chain page: elfldr-check.js, relapse.js, then autoload.js
+/app/<version>/__complete__  version marker, last in CACHE
+```
 
-Both prepare scripts run `tools/check_exploit_js.py` on the patched sources. It always performs
-a dependency-free collision scan and, when Node is available, parses ES modules as modules.
-This catches syntax errors that a CommonJS parse of a `.js` file may miss.
+The pointer checks the marker before navigating, then sends the user to the chain
+page they chose, so partial cache downloads cannot start the app. The HTTP server
+serves the standalone chain pages verbatim. It withholds the installer's manifest
+attribute until a supported choice is present, as described above.
 
-To update relapse: `git -C third_party/relapse fetch && git -C third_party/relapse checkout <commit>`,
-re-run the script, and regenerate the patch if it no longer applies
-(`git -C <scratch copy> diff --cached --full-index > patches/relapse-autoload.patch`). Keep
-`RELAPSE_URL` in `app.js` and `relapse_iframe_url()` in `gen_file_registry.py` in sync — the
-AppCache manifest must list the iframe URL exactly, query string included.
+`SIMULATE=1|2` and `tools/build_cache_corruption_test_elfs.sh` are available for
+hardware testing of failed-cache repair.
 
-## Umtx2 integration
+## Verification
 
-`umtx2` is a pinned, **pristine** submodule. The build copies its `document/en/ps5` directory
-(flattened to the copy root, so the exploit serves at `/app/umtx2/`) to the gitignored
-`frontend/autoloader/umtx2/` and applies `patches/umtx2-autoload.patch` there
-(`tools/apply_umtx2_patch.sh`, run automatically by the Makefile). The bundled payloads dir is
-pruned down to `elfldr-ps5.elf` — umtx2 boots its **own** elfldr, exactly like stock umtx2.
+`make test-native` runs remote-loader's common native helper tests on Linux (or
+inside the SDK container). PS5 services are stubbed and all `/user` filesystem
+operations are redirected into a temporary tree. The tests cover installation
+and updates with two app configurations, embedded resources, service errors,
+notifications, browser launch, foreground-user cleanup, long-log truncation and
+raw DEFLATE. Native ELF compilation still uses the PS5 SDK.
 
-The patch (in `umtx2/main.js`):
+`make test` runs the four offline suites. `tools/test_elfldr_check.js` drives the
+real check payload through the upstream queue, verifying accepted/refused sockets,
+descriptor cleanup, and skipping the remaining payloads on a stop or unexpected
+probe failure. `tools/test_autoload_payload.js` covers
+the third payload: ELF staging into the mapping, the hand-off to elfldr, short
+socket writes, the missing-`krw` refusal and cleanup on failure.
+`tools/test_installer.js` checks the installer's cache events, the marker gate,
+choice gating in both orders, error handling, repair confirmation and the pointer.
+`tools/test_selection_flow.js` checks that a pick is stored on the origin and that
+the pointer routes to the matching chain page, that lone-chain firmware neither
+prompts nor leaves the choice unset, and that both chain pages are staged and
+cached so a switch never invalidates anything.
 
-- Keeps `load_local_elf("elfldr-ps5.elf")` loading umtx2's own `payloads/elfldr-ps5.elf` (stock
-  behavior; the shared elfldr is only used by relapse).
-- Adds an optional `base` parameter to `load_payload_into_elf_store_from_local_file` and
-  `load_local_elf` so different base paths can be used without duplicating the fetch logic.
-- Threads `payload_info.wkalBase` through the main loop's fetch call, so the payload is
-  always fetched via the same code path as a regular button press.
-- `?autoload=payload.elf`: after elfldr loads and `switchPage("payloads-view")` completes,
-  waits 4 s (it must bind 9021), then fires a synthetic `MAINLOOP_EXECUTE_PAYLOAD_REQUEST`
-  event with `{fileName, wkalBase: "../payloads/", toPort: 9021, wkalAutoload: true}`.
-  The main loop processes it identically to a button press.
-- The main loop's success and error handlers post `{type:"wkal", kind:"autoload", ok, bytes}`
-  (or `{ok:false, why}`) to the parent page when `payload_info.wkalAutoload` is set.
-- Neutralizes the `confirm()` dialogs around the elfldr probe so the chain runs unattended.
+Upstream `third_party/ps5-webkit-remote-loader/tools/probe_standalone.js` and
+`tools/boot_probe.js` check the generated HTML, inline resources, modules, firmware
+offsets and boot order. `SIMULATE=1|2` builds and
+`tools/build_cache_corruption_test_elfs.sh` cover failed-cache repair.
 
-To update umtx2: `git -C third_party/umtx2 fetch && git -C third_party/umtx2 checkout <commit>`,
-re-run the script, and regenerate `patches/umtx2-autoload.patch` if it no longer applies. Keep the
-`?v=` cache-buster on `UMTX2_IFRAME_URL` in `app.js`/`gen_file_registry.py` in sync.
-
-## Shared elfldr
-
-relapse (FW 7.00–13.60) boots the **shared** elfldr, served at `/app/<version>/shared/elfldr-ps5.elf`
-(staged from `frontend/autoloader/shared/`). `tools/download_deps.sh` fetches it from the pinned
-`itsPLK/ps5-elfldr` release (tag `ELFLDR_TAG`), sha256-verifies it, and caches the digest in a
-`.sha256` sidecar so offline rebuilds work. umtx2 (FW 1.00–5.50) boots its **own** elfldr from
-the umtx2 submodule instead, matching stock umtx2 behavior.
-
-## Payload dependency
-
-`tools/download_deps.sh` (the Makefile's `payload-deps` target) downloads
-`frontend/autoloader/payloads/payload.elf` from the `ps5-unified-autoloader` submodule's pinned
-GitHub release, sha256-verifies it, and caches the digest in a `.sha256` sidecar so offline
-rebuilds work. Bump the submodule to pick up a newer release.
-
-## Versioning
-
-The base version lives in `include/wkali.h` (`WKAL_VERSION`). `tools/gen_version.py` produces
-the full version — `<base>` for stable (`BUILD_TYPE=stable`) or `<base>-dev-<suffix>` for dev —
-and regenerates `include/wkali_version.h`, `assets/param.json` and the version placeholders in
-the pages. The full version also names the staged app directory (`/app/<version>/`), the
-pointer page's redirect/marker targets and the `__complete__` content, so the whole cache
-layout is version-keyed. It ends up in the installer ELF, the host banner and the artifact
-names.
-
-## Conventions
-
-- The ELF serves the autoloader under `/app/<version>/`; the PC host maps `/app/` to its root.
-- Never put `manifest="..."` on the autoloader page — caching is the installer page's job.
-- Never edit `third_party/relapse/` or `third_party/umtx2/`, nor the generated
-  `frontend/autoloader/relapse/` / `frontend/autoloader/umtx2/` — edit the patch files instead.
-- The pointer page (`frontend/pointer/`) and the manifest ordering are the partial-cache guard:
-  keep `__complete__` the LAST cache entry and never reorder it before the pointer.
-- After changing `host.py`, rebuild the host (`make host` / `build_release.sh`).
+None of this can establish exploit reliability; that needs a PS5 hardware run.

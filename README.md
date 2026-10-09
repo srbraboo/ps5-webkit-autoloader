@@ -3,12 +3,7 @@
 </p>
 <h1 align="center">PS5 WebKit Autoloader</h1>
 &nbsp;
-<p align="center">Automatically loads the WebKit exploit and your elf payloads.<br>Supports firmwares <b>1.00&ndash;5.50</b> and <b>7.00&ndash;13.60</b>.</p>
-
-<p align="center">
-  <a href=".github/screenshots/webkit_autoloader.jpeg"><img src=".github/screenshots/webkit_autoloader.jpeg" width="260" alt="WebKit Autoloader - exploit running" /></a>
-  <a href=".github/screenshots/webkit_autoloader_installer.jpeg"><img src=".github/screenshots/webkit_autoloader_installer.jpeg" width="260" alt="Installer" /></a>
-</p>
+<p align="center">Automatically loads the WebKit exploit and your elf payloads.<br>Supports firmwares <b>7.00&ndash;13.60</b>.</p>
 
 <p align="center">
     <b>Other Autoloaders:</b><br>
@@ -23,8 +18,7 @@ WebKit exploits are usually loaded by pointing your PS5's DNS at some server hos
 
 This autoloader does it differently:
 
-- **Fully offline, no third-party DNS.** After a one-time install from your PC, everything is served straight from your PS5. There's nothing external to go down or change behind your back.  
-  Firmwares 12.02–13.60 run **Relapse**, which requires an active network interface (Wi-Fi or Ethernet connected to a local network; Internet access is not required).
+- **Fully offline, no third-party DNS.** After a one-time install from your PC, everything is served straight from your PS5. There's nothing external to go down or change behind your back.
 - **One-time setup, then a homescreen shortcut.** Once it's installed, you don't need a PC or the internet — just launch "WebKit Autoloader" from the homescreen and you're done.
 - **Payloads loaded the way you already know.** After the exploit chain runs, your payloads are sent just like in [Y2JB](https://github.com/itsPLK/ps5-y2jb-autoloader) / [BD-JB](https://github.com/itsPLK/ps5-bdjb-autoloader) / [Lua](https://github.com/itsPLK/ps5-lua-autoloader) autoloaders — via **Payload Manager**, or a custom `autoload.txt`.
 
@@ -37,7 +31,7 @@ There are two ways to set up the autoloader, depending on whether you're already
 
 1. Download `webkit-autoloader-installer_vX.Y.Z.elf` from the [Releases](https://github.com/itsPLK/ps5-webkit-autoloader/releases) page.
 2. Send it to your PS5 with `elfldr`, or launch it from Payload Manager.
-3. The installer opens the browser once to cache the autoloader page, then creates the **WebKit Autoloader** app on the homescreen and exits.
+3. The installer opens the browser to cache the autoloader page (choose Poops or Relapse if prompted), creates the **WebKit Autoloader** app on the homescreen, and exits.
 4. **Reboot once**, then launch **WebKit Autoloader** from the homescreen.
 
 ### Not jailbroken yet
@@ -47,7 +41,7 @@ If you aren't jailbroken yet, you'll need to host the exploit locally on your PC
 1. Download `webkit-autoloader-host.py` (or the `.exe`) from the [Releases](https://github.com/itsPLK/ps5-webkit-autoloader/releases) and run it on a PC on your network.
 2. On your PS5, set your network's DNS server to your PC's IP address.
 3. Open the **User's Guide** from Settings to run the installer, which adds the **WebKit Autoloader** app to your homescreen.
-4. Launch **WebKit Autoloader** from the homescreen.
+4. **Reboot once**, then launch **WebKit Autoloader** from the homescreen.
 
 ## How to Use
 
@@ -91,7 +85,7 @@ The latest installer payload will re-create the homescreen app and refresh the c
 <Details>
 <Summary><i>How to use a custom ELF Loader?</i></Summary>
 
-On firmwares 7.00–13.60 (Relapse / Poops), the autoloader uses a custom version of **elfldr** that only accepts connections from the PS5 itself (localhost). This improves security by preventing unauthorized devices on your network from sending payloads to your console. On firmwares 1.00–5.50 (umtx2), the stock elfldr is booted.
+The autoloader uses a custom version of **elfldr** that only accepts connections from the PS5 itself (localhost). This improves security by preventing unauthorized devices on your network from sending payloads to your console.
 
 If you want to use a "normal" ELF Loader that allows sending payloads from any device, you can simply load it through **Payload Manager**.
 
@@ -115,17 +109,19 @@ etaHEN.elf
 
 ## For developers
 
-The technical internals and project architecture are documented in **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+If you want to create or test your own WebKit payloads, check out [ps5-webkit-remote-loader](https://github.com/itsPLK/ps5-webkit-remote-loader), which this project is based on. It lets you send and run JavaScript payloads directly over the network on port 9027.
+
+Build both release artifacts with `./build_release.sh` (Docker required). The build
+uses remote-loader's standalone HTML and host builders directly. Run `make test` for
+the offline checks (payload, installer, and exploit-selection flow) and `make dev` for
+a local page preview. See [ARCHITECTURE.md](ARCHITECTURE.md) for the build and cache layout.
 
 ## Credits
 
-* **[idlesauce](https://github.com/idlesauce)** & contributors — [umtx2](https://github.com/idlesauce/umtx2)
 * **[jordyidk](https://github.com/jordyidk)** & contributors — [slopkit (Poops)](https://github.com/jordyidk/slopkit)
-* **[soniciso1](https://github.com/soniciso1)** — [Relapse](https://github.com/soniciso1/relapse), bringing down Poops support to lower firmwares (7.00–8.60)
-* **[ntfargo](https://github.com/ntfargo)** & contributors — [Relapse](https://github.com/ntfargo/Relapse-Exploit)
-* **[ufm42](https://github.com/ufm42)** - [kexp](https://github.com/ufm42/kexp)
+* **[soniciso1](https://github.com/soniciso1)**, **[ntfargo](https://github.com/ntfargo)** & contributors — [Relapse](https://github.com/soniciso1/relapse)
 * **[john-tornblom](https://github.com/john-tornblom)** — [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk/) and [elfldr](https://github.com/ps5-payload-dev/elfldr)
-* **[madler](https://github.com/madler)** — [puff](https://github.com/madler/zlib/tree/master/contrib/puff)
+* See [ps5-webkit-remote-loader](https://github.com/itsPLK/ps5-webkit-remote-loader) for runtime and toolchain credits.
 * Everyone else contributing to the PS5 homebrew scene.
 
 
@@ -139,3 +135,13 @@ This project is licensed under the GPL-3.0 License.
 
 ## Donate
 - [donate to PLK](DONATE.md)
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=itsplk%2Fps5-webkit-autoloader&type=date&releases=&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=itsplk/ps5-webkit-autoloader&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=itsplk/ps5-webkit-autoloader&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=itsplk/ps5-webkit-autoloader&type=date&legend=bottom-right" />
+ </picture>
+</a>

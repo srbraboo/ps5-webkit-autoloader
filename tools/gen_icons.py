@@ -7,10 +7,6 @@ every generated asset gets a dark background and ~10% padding added.
 Outputs:
   assets/icon0.png                        PS5 homescreen icon (512x512)
   assets/icon.ico                         Windows .exe icon (16-256px)
-  frontend/installer-page/favicon.svg     installer page favicon (padded + bg)
-  frontend/autoloader/favicon.svg         autoloader page favicon (padded + bg)
-  frontend/installer-page/logo.svg        raw master art, for in-page use
-  frontend/autoloader/logo.svg            raw master art, for in-page use
 
 Rendering: rsvg-convert when available (installed in the ps5-webkit-autoloader-sdk
 docker image), qlmanage as the built-in macOS fallback. Run via `make icons`.
@@ -27,10 +23,6 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MASTER = os.path.join(ROOT, "assets", "icon.svg")
 ICON0 = os.path.join(ROOT, "assets", "icon0.png")
 ICON_ICO = os.path.join(ROOT, "assets", "icon.ico")
-FAVICON_INSTALLER = os.path.join(ROOT, "frontend", "installer-page", "favicon.svg")
-FAVICON_AUTOLOADER = os.path.join(ROOT, "frontend", "autoloader", "favicon.svg")
-LOGO_INSTALLER = os.path.join(ROOT, "frontend", "installer-page", "logo.svg")
-LOGO_AUTOLOADER = os.path.join(ROOT, "frontend", "autoloader", "logo.svg")
 
 VIEWBOX = 1024
 ART_RADIUS = 510.04  # outermost extent of the master art (ring reaches y=1022.08)
@@ -139,21 +131,8 @@ def main():
         with open(ICON_ICO, "wb") as f:
             f.write(build_ico(pngs))
 
-        # Favicon SVGs (same wrapper, no rasterization needed)
-        for path in (FAVICON_INSTALLER, FAVICON_AUTOLOADER):
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as f:
-                f.write(wrapper)
-
-        # In-page logo SVGs (raw master art, no wrapper background)
-        for path in (LOGO_INSTALLER, LOGO_AUTOLOADER):
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as f:
-                f.write(master_src)
-
     print("Generated icon assets from assets/icon.svg:")
-    for path in (ICON0, ICON_ICO, FAVICON_INSTALLER, FAVICON_AUTOLOADER,
-                 LOGO_INSTALLER, LOGO_AUTOLOADER):
+    for path in (ICON0, ICON_ICO):
         print(f"  {os.path.relpath(path, ROOT)} ({os.path.getsize(path)} bytes)")
     return 0
 

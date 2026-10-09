@@ -16,15 +16,17 @@ The base version comes from WKAL_VERSION in include/wkali.h. BUILD_TYPE is
 taken from the BUILD_TYPE environment variable (default: dev).
 
 When CUSTOM_VERSION is set, it is appended to the base version and takes
-precedence over the build type (e.g. CUSTOM_VERSION=umtx2-test -> 0.0.1-umtx2-test).
+precedence over the build type (e.g. CUSTOM_VERSION=cache-test -> 0.0.1-cache-test).
 The custom suffix is also shown in the PS5 homescreen app title.
 
 Usage:
     gen_version.py                 # (re)generate version header and app metadata
     gen_version.py --print         # print the full version string
+    gen_version.py --page-config PATH  # emit standalone UI build information
 """
 
 import datetime
+import json
 import os
 import re
 import subprocess
@@ -90,7 +92,7 @@ def get_version_info(build_type=None):
         "base": base,
         "build_type": build_type,
         "suffix": suffix,
-        "full": full,
+        "full": os.environ.get("BUILD_VERSION") or full,
         "git_hash": git_hash or "unknown",
         "dirty": bool(dirty),
         "build_time": datetime.datetime.now(datetime.timezone.utc).strftime(
@@ -130,6 +132,20 @@ def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
     if argv and argv[0] == "--print":
         print(get_version_info()["full"])
+        return 0
+    if argv and argv[0] == "--build-time":
+        print(get_version_info()["build_time"])
+        return 0
+    if argv and argv[0] == "--title":
+        info = get_version_info()
+        print(f"WebKit Autoloader v{info['full']} by PLK (built {info['build_time']})")
+        return 0
+
+    if len(argv) == 2 and argv[0] == "--page-config":
+        info = get_version_info()
+        config = {"version": info["full"], "buildTime": info["build_time"]}
+        data = "window.WKAL_PAGE = " + json.dumps(config).replace("<", "\\u003c") + ";\n"
+        write_if_changed(os.path.abspath(argv[1]), data.encode("utf-8"))
         return 0
 
     info = get_version_info()
