@@ -8,7 +8,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Shared elfldr (same ELF across all exploit chains)
 ELFLDR_SUBMODULE="$ROOT/third_party/ps5-elfldr"
 ELFLDR_REPO="itsPLK/ps5-elfldr"
-ELFLDR_TAG="v0.26-bb1e117"
 ELFLDR_DEST="$ROOT/build/deps/elfldr.elf"
 
 # Bundled autoload payload
@@ -145,7 +144,8 @@ if [ ! -e "$PAYLOAD_SUBMODULE/.git" ]; then
     exit 1
 fi
 
-PAYLOAD_TAG=$(git -C "$PAYLOAD_SUBMODULE" describe --tags --always)
+ELFLDR_TAG="${ELFLDR_TAG:-$(git -C "$ELFLDR_SUBMODULE" describe --tags --always 2>/dev/null || echo v0.27-b57d0e9)}"
+PAYLOAD_TAG="${PAYLOAD_TAG:-$(git -C "$PAYLOAD_SUBMODULE" describe --tags --always 2>/dev/null || echo v0.1.6-e7093cd)}"
 
 download_release "$ELFLDR_REPO" "$ELFLDR_TAG" "$ELFLDR_DEST"
 download_release "$PAYLOAD_REPO" "$PAYLOAD_TAG" "$PAYLOAD_DEST"

@@ -1,6 +1,5 @@
-// Third payload in each chain page. The exploit runs second and brings up elfldr
-// on port 9021, so this only has to stage the ELF and hand it over. No chain
-// selection happens here: the page is already built for one chain.
+// Final payload. The selection orchestrator runs first and the selected exploit
+// brings up elfldr on port 9021 before this stages and sends the configured ELF.
 //
 // Resources are embedded by remote-loader's builder, so the fetch below is
 // served from the page itself and still works after the exploit has taken the
@@ -32,9 +31,12 @@ async function connect(api) {
 
 async function loadElf(api) {
   const elfName = (api && Array.isArray(api.args) && api.args[0]) || "autoload.elf";
-  const response = await fetch(elfName);
-  if (!response.ok) throw new Error("Could not load " + elfName + ".");
-  const bytes = await response.arrayBuffer();
+  let bytes = api && Array.isArray(api.args) && api.args[1];
+  if (!bytes) {
+    const response = await fetch(elfName);
+    if (!response.ok) throw new Error("Could not load " + elfName + ".");
+    bytes = await response.arrayBuffer();
+  }
   const view = new DataView(bytes);
   if (bytes.byteLength < 0x1000 || view.getUint32(0, true) !== 0x464c457f)
     throw new Error(elfName + " is not an ELF binary.");
@@ -56,10 +58,6 @@ async function loadElf(api) {
 }
 
 return async function (api) {
-  // Payload three of three, so the exploit has already run. If it did not publish
-  // kernel access then nothing was achieved and no ELF should be sent.
-  if (!api.krw) throw new Error("The exploit did not complete; no ELF was sent.");
-
   const elf = await loadElf(api);
   await api.log("Autoload: staging " + elf.name + " (" + elf.size + " bytes)...", "info");
   let fd = -1;

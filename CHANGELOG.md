@@ -2,6 +2,72 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.8.3] - 2026-11-21
+
+### Dependencies
+* Updated Wobkot to [`8abe4a9`](https://github.com/ufm42/wobkot/tree/8abe4a9)
+  - Updated offsets for FW 5.00, 5.02, 5.10, 5.50, 6.00, 6.02, and 6.50.
+
+## [v0.8.2] - 2026-11-20
+
+* Fixed FW 5.xx being rejected by the Wobkot adapter before exploitation.
+
+### Dependencies
+* Updated [ps5-webkit-remote-loader](https://github.com/itsPLK/ps5-webkit-remote-loader)
+  to commit [`073718c`](https://github.com/itsPLK/ps5-webkit-remote-loader/tree/073718c) (v0.3.1).
+
+## [v0.8.1] - 2026-11-20
+
+### Dependencies
+* Updated Wobkot to [`38ad28e`](https://github.com/ufm42/wobkot/tree/38ad28e)
+  - Added Relapse support for FW 5.00, 5.02, 5.10, and 5.50.
+  - Updated offsets for FW 6.00, 6.02, 13.40, and 13.60.
+
+This expands supported firmware to **5.00–13.60**.
+
+## [v0.8.0] - 2026-11-20
+
+* **Migrated to Wobkot**: Now uses [ufm42's Wobkot](https://github.com/ufm42/wobkot)
+  base and Relapse implementation as the preferred exploit,
+  with Poops used automatically as the fallback where appropriate.
+  This expands supported firmware to **6.00–13.60**.
+
+### Dependencies
+* Updated [ps5-webkit-remote-loader](https://github.com/itsPLK/ps5-webkit-remote-loader)
+  to commit `2c87626`.
+
+## [v0.7.1] - 2026-11-08
+
+* **Fixed Poops stability**: A stability fix for Relapse in v0.7.0 was unintentionally affecting Poops, causing slower runs and more kernel panics.
+* **Cleaned up Poops logging**: Poops now shows cleaner, less noisy output.
+
+### Dependencies
+* Updated [ps5-webkit-remote-loader](https://github.com/itsPLK/ps5-webkit-remote-loader) to v0.2.2
+
+## [v0.7.0] - 2026-11-06
+
+Most of this release is changes in [ps5-webkit-remote-loader](https://github.com/itsPLK/ps5-webkit-remote-loader), the shared base this project builds on. Main changes:
+
+* **Switched Relapse to [notmaj0r](https://github.com/notmaj0r)'s [Lua implementation](https://github.com/notmaj0r/remote_lua_loader)**: Adapted to run through the remote loader's new Lua runtime (LuaK1t)
+* **Fixed freezes/hangs during loading**: Resolved several causes of the loader hanging or freezing mid-load in the shared exploit runner.
+* **Modular AppCache loading**: Replaced the monolithic single-file HTML bundle (with payloads inlined as base64) with a modular architecture staged into AppCache, cutting build artifact sizes substantially (`host.py` ~11.9MB → ~3.7MB, installer `.elf` ~3.9MB → ~2.1MB).
+* **Automatic exploit selection**: Automatically selects the best exploit based on firmware version and network status:
+  - **FW > 12.00 and FW <= 13.60**: Relapse (Poops does not support > 12.00)
+  - **FW == 9.05**: Poops (Relapse does not support 9.05)
+  - **Active network connection**: Relapse
+  - **Offline (FW <= 12.00)**: Poops (works without active network connection)
+
+### Dependencies
+* Updated [ps5-webkit-remote-loader](https://github.com/itsPLK/ps5-webkit-remote-loader) to v0.2.0
+* Updated [ps5-unified-autoloader](https://github.com/itsPLK/ps5-unified-autoloader) to v0.1.7
+
+## [v0.6.2] - 2026-10-28
+
+- Updated [ps5-unified-autoloader](https://github.com/itsPLK/ps5-unified-autoloader) to v0.1.6
+  - includes bundled [Payload Manager](https://github.com/itsPLK/ps5-payload-manager) v0.6.3
+- Updated [ps5-elfldr](https://github.com/itsPLK/ps5-elfldr) to v0.27
+- Updated [ps5-webkit-remote-loader](https://github.com/itsPLK/ps5-webkit-remote-loader) to v0.1.2
+  - Added Relapse support for FW 11.40 (credit: [@tidewell](https://github.com/tidewell), [@notmaj0r](https://github.com/notmaj0r))
 ## [v0.6.1] - 2026-10-08
 
 * **9.05, 11.40 & 11.60**: Added missing offsets to fix Poops support.
